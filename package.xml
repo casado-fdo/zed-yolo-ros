@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>zed_yolo_ros</name>
+  <version>0.0.1</version>
+  <description>The zed_yolo_ros package</description>
+
+  <maintainer email="casado.fdo@gmail.com">Fernando E. Casado</maintainer>
+
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>rospy</depend>
+  <depend>sensor_msgs</depend>
+
+</package>
