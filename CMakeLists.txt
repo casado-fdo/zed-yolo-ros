@@ -9,6 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sensor_msgs
   roslaunch
+  zed_interfaces
 )
 #roslaunch_add_file_check(launch)
 

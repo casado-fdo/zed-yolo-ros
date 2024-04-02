@@ -2,6 +2,7 @@
 
 import rospy
 from std_msgs.msg import String
+import zed_interfaces.msg as zed_msgs
 
 import numpy as np
 
@@ -89,7 +90,7 @@ def main():
     global image_net, exit_signal, run_signal, detections
 
     # Define ROS publisher 
-    pub = rospy.Publisher('zed_yolo', String, queue_size=10)
+    pub = rospy.Publisher('zed_yolo', zed_msgs.ObjectsStamped, queue_size=10)
 
     capture_thread = Thread(target=torch_thread, kwargs={'weights': opt.weights, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
     capture_thread.start()
@@ -193,12 +194,30 @@ def main():
             # Tracking view
             track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
             
-            # Publish in ROS
-            time = rospy.get_time()
-            ros_msg = ""
-            for obj in objects.object_list:
-                ros_msg = ros_msg + "{}--{}--{}".format(obj.id, obj.raw_label, obj.position) + "\n"            
-            pub.publish(str(time) + " " + ros_msg)
+            # Publish in ROS as a ObjectStamped message
+            if len(objects.object_list) > 0:
+                ros_msg = zed_msgs.ObjectsStamped()
+                ros_msg.header.stamp = rospy.Time.now()
+                ros_msg.header.frame_id = "zed2i"
+                obj_list = []
+                for obj in objects.object_list:
+                    obj_msg = zed_msgs.Object()
+                    obj_msg.label = str(obj.label)
+                    obj_msg.label_id = obj.label
+                    obj_msg.instance_id = obj.id
+                    #obj_msg.sublabel = obj.sublabel
+                    obj_msg.confidence = obj.confidence
+                    obj_msg.position = obj.position
+                    #obj_msg.position_covariance = obj.position_covariance
+                    #obj_msg.velocity = obj.velocity
+                    #obj_msg.tracking_available = obj.tracking_available
+                    #obj_msg.tracking_state = obj.tracking_state
+                    #obj_msg.bounding_box_2d = obj.bounding_box_2d
+                    #obj_msg.bounding_box_3d = obj.bounding_box_3d
+                    obj_list.append(obj_msg)
+                #    ros_msg = ros_msg + "{}--{}--{}".format(obj.id, obj.raw_label, obj.position) + "\n"            
+                ros_msg.objects = obj_list
+                pub.publish(ros_msg)
 
             cv2.imshow("ZED | 2D View and Birds View", global_image)
             key = cv2.waitKey(10)
