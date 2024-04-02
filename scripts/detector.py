@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
-import sys
+import rospy
+from std_msgs.msg import String
+
 import numpy as np
 
 import argparse
@@ -86,6 +88,9 @@ def torch_thread(weights, img_size, conf_thres=0.2, iou_thres=0.45):
 def main():
     global image_net, exit_signal, run_signal, detections
 
+    # Define ROS publisher 
+    pub = rospy.Publisher('zed_yolo', String, queue_size=10)
+
     capture_thread = Thread(target=torch_thread, kwargs={'weights': opt.weights, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
     capture_thread.start()
 
@@ -152,7 +157,7 @@ def main():
     # Camera pose
     cam_w_pose = sl.Pose()
 
-    while viewer.is_available() and not exit_signal:
+    while rospy.is_shutdown() is False and exit_signal is False:
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
             # -- Get the image
             lock.acquire()
@@ -187,6 +192,13 @@ def main():
             global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
             # Tracking view
             track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
+            
+            # Publish in ROS
+            time = rospy.get_time()
+            ros_msg = ""
+            for obj in objects.object_list:
+                ros_msg = ros_msg + "{}--{}--{}".format(obj.id, obj.raw_label, obj.position) + "\n"            
+            pub.publish(str(time) + " " + ros_msg)
 
             cv2.imshow("ZED | 2D View and Birds View", global_image)
             key = cv2.waitKey(10)
@@ -201,6 +213,9 @@ def main():
 
 
 if __name__ == '__main__':
+    rospy.init_node("zed_yolo_ros", anonymous=True)
+    rospy.loginfo("ZED YOLO node started")
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='yolov8m.pt', help='model.pt path(s)')
     parser.add_argument('--svo', type=str, default=None, help='optional svo file')
