@@ -84,6 +84,45 @@ def torch_thread(weights, img_size, conf_thres=0.2, iou_thres=0.45):
             lock.release()
             run_signal = False
         sleep(0.01)
+    
+def ros_wrapper(objects):
+    ros_msg = zed_msgs.ObjectsStamped()
+    ros_msg.header.stamp = rospy.Time.now()
+    ros_msg.header.frame_id = "zed2i"
+    obj_list = []
+    for obj in objects.object_list:
+        obj_msg = zed_msgs.Object()
+        obj_msg.label = repr(obj.label)
+        #obj_msg.label_id = int(obj.label)
+        obj_msg.instance_id = obj.id
+        #obj_msg.sublabel = obj.sublabel
+        obj_msg.confidence = obj.confidence
+        pos = obj.position
+        obj_msg.position = [pos[0], pos[1], pos[2]]
+        pos_cov = obj.position_covariance
+        obj_msg.position_covariance = [pos_cov[0], pos_cov[1], pos_cov[2], pos_cov[3], pos_cov[4], pos_cov[5]]
+        vel = obj.velocity
+        obj_msg.velocity = [vel[0], vel[1], vel[2]]
+        obj_msg.tracking_available = True
+        if repr(obj.tracking_state) == "OFF":
+            obj_msg.tracking_state = 0
+        elif repr(obj.tracking_state) == "OK":
+            obj_msg.tracking_state = 1
+        else:
+            obj_msg.tracking_state = 2
+        bbox_3d = obj.bounding_box
+        if len(bbox_3d) == 8:
+            obj_msg.bounding_box_3d.corners[0].kp = [bbox_3d[0][0], bbox_3d[0][1], bbox_3d[0][2]]
+            obj_msg.bounding_box_3d.corners[1].kp = [bbox_3d[1][0], bbox_3d[1][1], bbox_3d[1][2]]
+            obj_msg.bounding_box_3d.corners[2].kp = [bbox_3d[2][0], bbox_3d[2][1], bbox_3d[2][2]]
+            obj_msg.bounding_box_3d.corners[3].kp = [bbox_3d[3][0], bbox_3d[3][1], bbox_3d[3][2]]
+            obj_msg.bounding_box_3d.corners[4].kp = [bbox_3d[4][0], bbox_3d[4][1], bbox_3d[4][2]]
+            obj_msg.bounding_box_3d.corners[5].kp = [bbox_3d[5][0], bbox_3d[5][1], bbox_3d[5][2]]
+            obj_msg.bounding_box_3d.corners[6].kp = [bbox_3d[6][0], bbox_3d[6][1], bbox_3d[6][2]]
+            obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
+        obj_list.append(obj_msg)         
+    ros_msg.objects = obj_list
+    return ros_msg  
 
 
 def main():
@@ -196,27 +235,7 @@ def main():
             
             # Publish in ROS as a ObjectStamped message
             if len(objects.object_list) > 0:
-                ros_msg = zed_msgs.ObjectsStamped()
-                ros_msg.header.stamp = rospy.Time.now()
-                ros_msg.header.frame_id = "zed2i"
-                obj_list = []
-                for obj in objects.object_list:
-                    obj_msg = zed_msgs.Object()
-                    obj_msg.label = str(obj.label)
-                    #obj_msg.label_id = int(obj.label)
-                    obj_msg.instance_id = obj.id
-                    #obj_msg.sublabel = obj.sublabel
-                    obj_msg.confidence = obj.confidence
-                    obj_msg.position = obj.position
-                    #obj_msg.position_covariance = obj.position_covariance
-                    #obj_msg.velocity = obj.velocity
-                    #obj_msg.tracking_available = obj.tracking_available
-                    #obj_msg.tracking_state = obj.tracking_state
-                    #obj_msg.bounding_box_2d = obj.bounding_box_2d
-                    #obj_msg.bounding_box_3d = obj.bounding_box_3d
-                    obj_list.append(obj_msg)
-                #    ros_msg = ros_msg + "{}--{}--{}".format(obj.id, obj.raw_label, obj.position) + "\n"            
-                ros_msg.objects = obj_list
+                ros_msg = ros_wrapper(objects)
                 pub.publish(ros_msg)
 
             #cv2.imshow("ZED | 2D View and Birds View", global_image)
