@@ -15,8 +15,8 @@ from ultralytics import YOLO
 from threading import Lock, Thread
 from time import sleep
 
-#import ogl_viewer.viewer as gl
-#import cv_viewer.tracking_viewer as cv_viewer
+import ogl_viewer.viewer as gl
+import cv_viewer.tracking_viewer as cv_viewer
 
 lock = Lock()
 run_signal = False
@@ -135,28 +135,28 @@ def main():
     obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
 
     # Display
-    #camera_infos = zed.get_camera_information()
-    #camera_res = camera_infos.camera_configuration.resolution
+    camera_infos = zed.get_camera_information()
+    camera_res = camera_infos.camera_configuration.resolution
     # Create OpenGL viewer
-    #viewer = gl.GLViewer()
-    #point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
-    #point_cloud_render = sl.Mat()
-    #viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
-    #point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
-    #image_left = sl.Mat()
+    viewer = gl.GLViewer()
+    point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
+    point_cloud_render = sl.Mat()
+    viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
+    point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
+    image_left = sl.Mat()
     # Utilities for 2D display
-    #display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
-    #image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
-    #image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
+    display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
+    image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
+    image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
 
     # Utilities for tracks view
-    #camera_config = camera_infos.camera_configuration
-    #tracks_resolution = sl.Resolution(400, display_resolution.height)
-    #track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
-    #track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
-    #image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
+    camera_config = camera_infos.camera_configuration
+    tracks_resolution = sl.Resolution(400, display_resolution.height)
+    track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
+    track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
+    image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
     # Camera pose
-    #cam_w_pose = sl.Pose()
+    cam_w_pose = sl.Pose()
 
     while rospy.is_shutdown() is False and exit_signal is False:
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
@@ -180,19 +180,19 @@ def main():
 
             # -- Display
             # Retrieve display data
-            #zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
-            #point_cloud.copy_to(point_cloud_render)
-            #zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
-            #zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
+            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
+            point_cloud.copy_to(point_cloud_render)
+            zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
+            zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
 
             # 3D rendering
-            #viewer.updateData(point_cloud_render, objects)
+            viewer.updateData(point_cloud_render, objects)
             # 2D rendering
-            #np.copyto(image_left_ocv, image_left.get_data())
-            #cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
-            #global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
+            np.copyto(image_left_ocv, image_left.get_data())
+            cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
+            global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
             # Tracking view
-            #track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
+            track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
             
             # Publish in ROS as a ObjectStamped message
             if len(objects.object_list) > 0:
@@ -219,14 +219,14 @@ def main():
                 ros_msg.objects = obj_list
                 pub.publish(ros_msg)
 
-            #cv2.imshow("ZED | 2D View and Birds View", global_image)
+            cv2.imshow("ZED | 2D View and Birds View", global_image)
             key = cv2.waitKey(10)
             if key == 27:
                 exit_signal = True
         else:
             exit_signal = True
 
-    #viewer.exit()
+    viewer.exit()
     exit_signal = True
     zed.close()
 
