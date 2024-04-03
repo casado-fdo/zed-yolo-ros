@@ -95,6 +95,7 @@ def ros_wrapper(objects):
         obj_msg = zed_msgs.Object()
         obj_msg.label = class_names[obj.raw_label]
         obj_msg.label_id = obj.raw_label
+        obj_msg.sublabel = repr(obj.id)
         obj_msg.instance_id = obj.id
         obj_msg.confidence = obj.confidence
         pos = obj.position
