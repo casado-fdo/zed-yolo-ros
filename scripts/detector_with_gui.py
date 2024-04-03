@@ -203,7 +203,7 @@ def main():
                 for obj in objects.object_list:
                     obj_msg = zed_msgs.Object()
                     obj_msg.label = str(obj.label)
-                    obj_msg.label_id = obj.label
+                    #obj_msg.label_id = obj.label
                     obj_msg.instance_id = obj.id
                     #obj_msg.sublabel = obj.sublabel
                     obj_msg.confidence = obj.confidence
