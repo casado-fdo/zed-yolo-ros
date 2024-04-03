@@ -21,7 +21,7 @@ from time import sleep
 lock = Lock()
 run_signal = False
 exit_signal = False
-
+class_names = []
 
 def xywh2abcd(xywh, im_shape):
     output = np.zeros((4, 2))
@@ -65,11 +65,12 @@ def detections_to_custom_box(detections, im0):
 
 
 def torch_thread(weights, img_size, conf_thres=0.2, iou_thres=0.45):
-    global image_net, exit_signal, run_signal, detections
+    global image_net, exit_signal, run_signal, detections, class_names
 
     print("Intializing Network...")
 
     model = YOLO(weights)
+    class_names = model.names
 
     while not exit_signal:
         if run_signal:
@@ -92,10 +93,9 @@ def ros_wrapper(objects):
     obj_list = []
     for obj in objects.object_list:
         obj_msg = zed_msgs.Object()
-        obj_msg.label = repr(obj.label)
-        #obj_msg.label_id = int(obj.label)
+        obj_msg.label = class_names[obj.raw_label]
+        obj_msg.label_id = obj.raw_label
         obj_msg.instance_id = obj.id
-        #obj_msg.sublabel = obj.sublabel
         obj_msg.confidence = obj.confidence
         pos = obj.position
         obj_msg.position = [pos[0], pos[1], pos[2]]
@@ -126,7 +126,7 @@ def ros_wrapper(objects):
 
 
 def main():
-    global image_net, exit_signal, run_signal, detections
+    global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
     pub = rospy.Publisher('zed_yolo', zed_msgs.ObjectsStamped, queue_size=10)
