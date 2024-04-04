@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import rospy
-from std_msgs.msg import String
 import zed_interfaces.msg as zed_msgs
 
 import numpy as np
@@ -15,15 +14,17 @@ from ultralytics import YOLO
 from threading import Lock, Thread
 from time import sleep
 
-#import ogl_viewer.viewer as gl
-#import cv_viewer.tracking_viewer as cv_viewer
+import shutil
+import os
 
 lock = Lock()
 run_signal = False
 exit_signal = False
 class_names = []
 
-def xywh2abcd(xywh, im_shape):
+CAMERA_NAME = "zed2i"
+
+def xywh2abcd(xywh):
     output = np.zeros((4, 2))
 
     # Center / Width / Height -> BBox corners coordinates
@@ -49,14 +50,14 @@ def xywh2abcd(xywh, im_shape):
     output[3][1] = y_max
     return output
 
-def detections_to_custom_box(detections, im0):
+def detections_to_custom_box(detections):
     output = []
     for i, det in enumerate(detections):
         xywh = det.xywh[0]
 
         # Creating ingestable objects for the ZED SDK
         obj = sl.CustomBoxObjectData()
-        obj.bounding_box_2d = xywh2abcd(xywh, im0.shape)
+        obj.bounding_box_2d = xywh2abcd(xywh)
         obj.label = det.cls
         obj.probability = det.conf
         obj.is_grounded = False
@@ -64,13 +65,43 @@ def detections_to_custom_box(detections, im0):
     return output
 
 
-def torch_thread(weights, img_size, conf_thres=0.2, iou_thres=0.45):
+def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
     global image_net, exit_signal, run_signal, detections, class_names
 
     print("Intializing Network...")
 
-    model = YOLO(weights)
-    class_names = model.names
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    models_path = script_path+'/../models/'
+    model_path = models_path+model_name+'.pt'
+    model_labels_path = models_path+model_name+'_labels.txt'
+
+    # Check if the model does not exists
+    if not os.path.isfile(model_path):
+        print("Model not found, downloading it...")
+
+        # Get the PyTorch model
+        model = YOLO(model_name+'.pt')
+        class_names = model.names
+
+        # Export the model as an engine
+        #model.export(format='engine')    
+
+        # Copy the models into the correct directory
+        shutil.copy(model_name+'.pt', models_path+model_name+'.pt')
+        #shutil.copy(model_name+'.engine', models_path+model_name+'.engine')
+
+        # Export the class names dictionary as a file
+        with open(model_labels_path, 'w') as f:
+            for i in range(len(class_names)):
+                f.write("%d, %s\n" % (i, class_names[i]))
+                
+    # Load the model
+    model = YOLO(models_path+model_name+'.pt')
+
+    # Load class names as a list
+    with open(model_labels_path, 'r') as f:
+        class_names = f.read().splitlines()
+    class_names = [name.split(', ')[1] for name in class_names]
 
     while not exit_signal:
         if run_signal:
@@ -81,15 +112,15 @@ def torch_thread(weights, img_size, conf_thres=0.2, iou_thres=0.45):
             det = model.predict(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres)[0].cpu().numpy().boxes
 
             # ZED CustomBox format (with inverse letterboxing tf applied)
-            detections = detections_to_custom_box(det, image_net)
+            detections = detections_to_custom_box(det)
             lock.release()
             run_signal = False
-        sleep(0.01)
+        sleep(0.001)
     
 def ros_wrapper(objects):
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
-    ros_msg.header.frame_id = "zed2i"
+    ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
     obj_list = []
     for obj in objects.object_list:
         obj_msg = zed_msgs.Object()
@@ -130,9 +161,9 @@ def main():
     global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
-    pub = rospy.Publisher('zed_yolo', zed_msgs.ObjectsStamped, queue_size=10)
+    pub = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=10)
 
-    capture_thread = Thread(target=torch_thread, kwargs={'weights': opt.weights, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
+    capture_thread = Thread(target=torch_thread, kwargs={'model_name': opt.model_name, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
     capture_thread.start()
 
     print("Initializing Camera...")
@@ -142,12 +173,12 @@ def main():
     input_type = sl.InputType()
     if opt.svo is not None:
         input_type.set_from_svo_file(opt.svo)
-
+        
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
     init_params.coordinate_units = sl.UNIT.METER
     init_params.depth_mode = sl.DEPTH_MODE.ULTRA  # QUALITY
-    init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Y_UP
+    init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
     init_params.depth_maximum_distance = 50
 
     runtime_params = sl.RuntimeParameters()
@@ -174,31 +205,8 @@ def main():
     objects = sl.Objects()
     obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
 
-    # Display
-    #camera_infos = zed.get_camera_information()
-    #camera_res = camera_infos.camera_configuration.resolution
-    # Create OpenGL viewer
-    #viewer = gl.GLViewer()
-    #point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
-    #point_cloud_render = sl.Mat()
-    #viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
-    #point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
-    #image_left = sl.Mat()
-    # Utilities for 2D display
-    #display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
-    #image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
-    #image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
 
-    # Utilities for tracks view
-    #camera_config = camera_infos.camera_configuration
-    #tracks_resolution = sl.Resolution(400, display_resolution.height)
-    #track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
-    #track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
-    #image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
-    # Camera pose
-    #cam_w_pose = sl.Pose()
-
-    while rospy.is_shutdown() is False and exit_signal is False:
+    while rospy.is_shutdown() is False:
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
             # -- Get the image
             lock.acquire()
@@ -217,46 +225,20 @@ def main():
             zed.ingest_custom_box_objects(detections)
             lock.release()
             zed.retrieve_objects(objects, obj_runtime_param)
-
-            # -- Display
-            # Retrieve display data
-            #zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
-            #point_cloud.copy_to(point_cloud_render)
-            #zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
-            #zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
-
-            # 3D rendering
-            #viewer.updateData(point_cloud_render, objects)
-            # 2D rendering
-            #np.copyto(image_left_ocv, image_left.get_data())
-            #cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
-            #global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
-            # Tracking view
-            #track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
             
             # Publish in ROS as a ObjectStamped message
             if len(objects.object_list) > 0:
                 ros_msg = ros_wrapper(objects)
                 pub.publish(ros_msg)
-
-            #cv2.imshow("ZED | 2D View and Birds View", global_image)
-            key = cv2.waitKey(10)
-            if key == 27:
-                exit_signal = True
-        else:
-            exit_signal = True
-
-    #viewer.exit()
-    exit_signal = True
     zed.close()
 
 
 if __name__ == '__main__':
-    rospy.init_node("zed_yolo_ros", anonymous=True)
+    rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='yolov8x-oiv7.pt', help='model.pt path(s)')
+    parser.add_argument('--model_name', type=str, default='yolov8x-oiv7', help='model path(s)')
     parser.add_argument('--svo', type=str, default=None, help='optional svo file')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
