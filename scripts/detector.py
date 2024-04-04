@@ -116,7 +116,8 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             lock.release()
             run_signal = False
         sleep(0.001)
-    
+
+# Wrap data into ROS ObjectStamped message
 def ros_wrapper(objects):
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
@@ -226,10 +227,9 @@ def main():
             lock.release()
             zed.retrieve_objects(objects, obj_runtime_param)
             
-            # Publish in ROS as a ObjectStamped message
-            if len(objects.object_list) > 0:
-                ros_msg = ros_wrapper(objects)
-                pub.publish(ros_msg)
+            # Publish in ROS as an ObjectStamped message
+            ros_msg = ros_wrapper(objects)
+            pub.publish(ros_msg)
     zed.close()
 
 
