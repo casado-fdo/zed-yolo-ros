@@ -17,6 +17,10 @@ from time import sleep
 import shutil
 import os
 
+import tf2_ros
+import tf2_geometry_msgs
+from geometry_msgs.msg import PointStamped
+
 lock = Lock()
 run_signal = False
 exit_signal = False
@@ -157,12 +161,39 @@ def ros_wrapper(objects):
     ros_msg.objects = obj_list
     return ros_msg  
 
+def local_to_map_transform(msg, tfBuffer):
+    try:
+        lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME + "_left_camera_frame")
+        transform = tfBuffer.lookup_transform("map", CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+        for obj in msg.objects:
+            p = PointStamped()
+            p.point.x = obj.position[0]
+            p.point.y = obj.position[1]
+            p.point.z = obj.position[2]
+            obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
+            obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
+            for corner in obj.bounding_box_3d.corners:
+                p.point.x = corner.kp[0]
+                p.point.y = corner.kp[1]
+                p.point.z = corner.kp[2]
+                corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
+                corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
+        msg.header.frame_id = "map"
+    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+        print("Failed to transform object from local to map frame")
+    return msg
+
 
 def main():
     global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
-    pub = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=10)
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=10)
+    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=10)
+
+    tfBuffer = tf2_ros.Buffer()
+    listener = tf2_ros.TransformListener(tfBuffer)
+    br = tf2_ros.TransformBroadcaster()
 
     capture_thread = Thread(target=torch_thread, kwargs={'model_name': opt.model_name, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
     capture_thread.start()
@@ -229,7 +260,8 @@ def main():
             
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
-            pub.publish(ros_msg)
+            pub_l.publish(ros_msg)
+            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
     zed.close()
 
 
@@ -238,7 +270,7 @@ if __name__ == '__main__':
     rospy.loginfo("ZED YOLO node started")
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='yolov8x-oiv7', help='model path(s)')
+    parser.add_argument('--model_name', type=str, default='yolov8l-oiv7', help='model path(s)')
     parser.add_argument('--svo', type=str, default=None, help='optional svo file')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
