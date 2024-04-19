@@ -179,8 +179,8 @@ def local_to_map_transform(msg, tfBuffer):
                 corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
                 corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
         msg.header.frame_id = "map"
-    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-        print("Failed to transform object from local to map frame")
+    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
+        print("Failed to transform object from local to map frame: ", e)
     return msg
 
 
@@ -274,6 +274,7 @@ if __name__ == '__main__':
     parser.add_argument('--svo', type=str, default=None, help='optional svo file')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
+
     opt = parser.parse_args()
 
     with torch.no_grad():
