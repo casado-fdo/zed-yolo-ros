@@ -20,6 +20,7 @@ import os
 import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import PointStamped
+from sensor_msgs.msg import Joy
 
 lock = Lock()
 run_signal = False
@@ -27,6 +28,8 @@ exit_signal = False
 class_names = []
 
 CAMERA_NAME = "zed2i"
+
+
 
 def xywh2abcd(xywh):
     output = np.zeros((4, 2))
@@ -112,13 +115,15 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             lock.acquire()
 
             img = cv2.cvtColor(image_net, cv2.COLOR_BGRA2RGB)
-            # https://docs.ultralytics.com/modes/predict/#video-suffixes
+            # https://docs.ultralytics.com/modes/predict/#video-suffixe
+            model = model.cpu()
             det = model.predict(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres)[0].cpu().numpy().boxes
 
             # ZED CustomBox format (with inverse letterboxing tf applied)
             detections = detections_to_custom_box(det)
             lock.release()
             run_signal = False
+            # cv2.imshow("ZED YOLO", img) # Display the resulting frame   
         sleep(0.001)
 
 # Wrap data into ROS ObjectStamped message
@@ -179,8 +184,8 @@ def local_to_map_transform(msg, tfBuffer):
                 corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
                 corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
         msg.header.frame_id = "map"
-    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-        print("Failed to transform object from local to map frame: ", e)
+    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
+        print("Failed to transform object from local to map frame")
     return msg
 
 
@@ -201,7 +206,6 @@ def main():
     print("Initializing Camera...")
 
     zed = sl.Camera()
-
     input_type = sl.InputType()
     if opt.svo is not None:
         input_type.set_from_svo_file(opt.svo)
@@ -212,6 +216,8 @@ def main():
     init_params.depth_mode = sl.DEPTH_MODE.ULTRA  # QUALITY
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
     init_params.depth_maximum_distance = 50
+    init_params.camera_resolution = sl.RESOLUTION.HD720
+    init_params.camera_fps = 30
 
     runtime_params = sl.RuntimeParameters()
     status = zed.open(init_params)
@@ -261,7 +267,7 @@ def main():
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
-            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
+            # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
     zed.close()
 
 
@@ -274,7 +280,6 @@ if __name__ == '__main__':
     parser.add_argument('--svo', type=str, default=None, help='optional svo file')
     parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
-
     opt = parser.parse_args()
 
     with torch.no_grad():

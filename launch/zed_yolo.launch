@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<launch>
+	<node pkg="zed_yolo_ros" type="detector.py" name="zed_yolo_ros" output="screen"/>
+</launch>
