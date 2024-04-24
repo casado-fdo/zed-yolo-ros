@@ -200,15 +200,15 @@ def main():
     listener = tf2_ros.TransformListener(tfBuffer)
     br = tf2_ros.TransformBroadcaster()
 
-    capture_thread = Thread(target=torch_thread, kwargs={'model_name': opt.model_name, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
+    capture_thread = Thread(target=torch_thread, kwargs={'model_name': opt[0], 'img_size': opt[2], "conf_thres": opt[3]})
     capture_thread.start()
 
     print("Initializing Camera...")
 
     zed = sl.Camera()
     input_type = sl.InputType()
-    if opt.svo is not None:
-        input_type.set_from_svo_file(opt.svo)
+    if opt[1] is not None:
+        input_type.set_from_svo_file(opt[1])
         
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
@@ -275,12 +275,14 @@ if __name__ == '__main__':
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='yolov8l-oiv7', help='model path(s)')
-    parser.add_argument('--svo', type=str, default=None, help='optional svo file')
-    parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
-    parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
-    opt = parser.parse_args()
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--model_name', type=str, default='yolov8l-oiv7', help='model path(s)')
+    # parser.add_argument('--svo', type=str, default=None, help='optional svo file')
+    # parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
+    # parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
+    # opt = parser.parse_args()
+    
+    opt = ["yolov8l-oiv7",None, 416, 0.4]    
 
     with torch.no_grad():
         main()
