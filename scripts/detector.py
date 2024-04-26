@@ -119,7 +119,7 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
             img = cv2.cvtColor(image_net, cv2.COLOR_BGRA2RGB)
             # https://docs.ultralytics.com/modes/predict/#video-suffixe
-            model = model.cpu()
+            # model = model.cpu()
             det = model.predict(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres)[0].cpu().numpy().boxes
 
             # ZED CustomBox format (with inverse letterboxing tf applied)
@@ -196,7 +196,7 @@ def main():
     global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=1)
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=50)
 
     tfBuffer = tf2_ros.Buffer()
@@ -216,10 +216,11 @@ def main():
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
     init_params.coordinate_units = sl.UNIT.METER
-    init_params.depth_mode = sl.DEPTH_MODE.ULTRA  # QUALITY
+    init_params.depth_mode = sl.DEPTH_MODE.QUALITY  # QUALITY/ULTRA/PERFORMANCE
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
-    init_params.depth_maximum_distance = 50
-    init_params.camera_resolution = sl.RESOLUTION.HD720
+    init_params.depth_maximum_distance = 10
+    init_params.depth_minimum_distance = 0.5
+    init_params.camera_resolution = sl.RESOLUTION.HD1080
     init_params.camera_fps = 30
 
     runtime_params = sl.RuntimeParameters()
@@ -251,11 +252,11 @@ def main():
     
     if display:
         # Create OpenGL viewer
-        viewer = gl.GLViewer()
-        point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
+        # viewer = gl.GLViewer()
+        # point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
         point_cloud_render = sl.Mat()
-        viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
-        point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
+        # viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
+        # point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
         image_left = sl.Mat()
         # Utilities for 2D display
         display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
@@ -301,13 +302,13 @@ def main():
             if display:
                 # -- Display
                 # Retrieve display data
-                zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
-                point_cloud.copy_to(point_cloud_render)
+                # zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
+                # point_cloud.copy_to(point_cloud_render)
                 zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
                 zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
     
                 # 3D rendering
-                viewer.updateData(point_cloud_render, objects)
+                # viewer.updateData(point_cloud_render, objects)
                 # 2D rendering
                 np.copyto(image_left_ocv, image_left.get_data())
                 cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
@@ -333,7 +334,8 @@ if __name__ == '__main__':
     # parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
     # opt = parser.parse_args()
     display = True
-    opt = ["yolov8l-oiv7",None, 416, 0.4]    
+    
+    opt = ["yolov8x-oiv7",None, 416, 0.4]    
 
     with torch.no_grad():
         main()
