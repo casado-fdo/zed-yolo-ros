@@ -29,6 +29,9 @@ class_names = []
 
 CAMERA_NAME = "zed2i"
 
+import ogl_viewer.viewer as gl
+import cv_viewer.tracking_viewer as cv_viewer
+
 
 
 def xywh2abcd(xywh):
@@ -242,6 +245,32 @@ def main():
 
     objects = sl.Objects()
     obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
+    
+    camera_infos = zed.get_camera_information()
+    camera_res = camera_infos.camera_configuration.resolution
+    
+    if display:
+        # Create OpenGL viewer
+        viewer = gl.GLViewer()
+        point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
+        point_cloud_render = sl.Mat()
+        viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
+        point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
+        image_left = sl.Mat()
+        # Utilities for 2D display
+        display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
+        image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
+        image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
+    
+        # Utilities for tracks view
+        camera_config = camera_infos.camera_configuration
+        tracks_resolution = sl.Resolution(400, display_resolution.height)
+        track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
+        track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
+        image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
+        # Camera pose
+        cam_w_pose = sl.Pose()
+
 
 
     while rospy.is_shutdown() is False:
@@ -268,6 +297,28 @@ def main():
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
             # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
+            
+            if display:
+                # -- Display
+                # Retrieve display data
+                zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
+                point_cloud.copy_to(point_cloud_render)
+                zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
+                zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
+    
+                # 3D rendering
+                viewer.updateData(point_cloud_render, objects)
+                # 2D rendering
+                np.copyto(image_left_ocv, image_left.get_data())
+                cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
+                global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
+                # Tracking view
+                track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
+    
+                cv2.imshow("ZED | 2D View and Birds View", global_image)
+                key = cv2.waitKey(10)
+                if key == 27:
+                    break
     zed.close()
 
 
@@ -281,7 +332,7 @@ if __name__ == '__main__':
     # parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
     # parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
     # opt = parser.parse_args()
-    
+    display = True
     opt = ["yolov8l-oiv7",None, 416, 0.4]    
 
     with torch.no_grad():
