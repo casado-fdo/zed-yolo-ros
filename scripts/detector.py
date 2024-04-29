@@ -74,12 +74,12 @@ def detections_to_custom_box(detections):
         output.append(obj)
     return output
 
+def get_data(dataset):
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    yaml_path = script_path+'/../'
+    return yaml_path + dataset
 
-def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
-    global image_net, exit_signal, run_signal, detections, class_names
-
-    print("Intializing Network...")
-
+def get_model(model_name):
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../models/'
     model_path = models_path+model_name+'.pt'
@@ -87,6 +87,7 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
     # Check if the model does not exists
     if not os.path.isfile(model_path):
+        global class_names
         print("Model not found, downloading it...")
 
         # Get the PyTorch model
@@ -105,13 +106,23 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             for i in range(len(class_names)):
                 f.write("%d, %s\n" % (i, class_names[i]))
                 
-    # Load the model
-    model = YOLO(models_path+model_name+'.pt')
-
-    # Load class names as a list
+        
+        # Load class names as a list
     with open(model_labels_path, 'r') as f:
         class_names = f.read().splitlines()
     class_names = [name.split(', ')[1] for name in class_names]
+                
+    # Load the model
+    model = YOLO(models_path+model_name+'.pt')
+    return model
+
+def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
+    global image_net, exit_signal, run_signal, detections, class_names
+
+    print("Intializing Network...")
+
+    model = get_model(model_name)
+
 
     while not exit_signal:
         if run_signal:
@@ -334,8 +345,16 @@ if __name__ == '__main__':
     # parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
     # opt = parser.parse_args()
     display = True
-    
-    opt = ["yolov8x-oiv7",None, 416, 0.4]    
-
+    train = True
+    # opt = ["yolov8x-oiv7",None, 416, 0.4]    
+    opt = ["yolov8x",None, 416, 0.4]    
+    script_path = os.path.dirname(os.path.realpath(__file__))
+    models_path = script_path+'/../data/'
+    if train:
+        model = get_model(model_name=opt[0])
+        
+        data = get_data('coco.yaml')
+        # Train the model
+        results = model.train(data='coco.yaml', epochs=100, imgsz=640)
     with torch.no_grad():
         main()
