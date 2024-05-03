@@ -76,7 +76,7 @@ def detections_to_custom_box(detections):
 
 def get_data(dataset):
     script_path = os.path.dirname(os.path.realpath(__file__))
-    yaml_path = script_path+'/../'
+    yaml_path = script_path+'/'
     return yaml_path + dataset
 
 def get_model(model_name):
@@ -264,7 +264,7 @@ def main():
     if display:
         # Create OpenGL viewer
         # viewer = gl.GLViewer()
-        # point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
+        # point_    oud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
         point_cloud_render = sl.Mat()
         # viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
         # point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
@@ -345,9 +345,9 @@ if __name__ == '__main__':
     # parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
     # opt = parser.parse_args()
     display = True
-    train = True
+    train = False
     # opt = ["yolov8x-oiv7",None, 416, 0.4]    
-    opt = ["yolov8x",None, 416, 0.4]    
+    opt = ["yolov8x",None, 416, 0.5]    
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../data/'
     if train:
@@ -355,6 +355,7 @@ if __name__ == '__main__':
         
         data = get_data('coco.yaml')
         # Train the model
-        results = model.train(data='coco.yaml', epochs=100, imgsz=640)
-    with torch.no_grad():
-        main()
+        results = model.train(data=data, epochs=100, imgsz=640, verbose=True)
+    else:
+        with torch.no_grad():
+            main()
