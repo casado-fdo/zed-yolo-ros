@@ -178,6 +178,7 @@ def ros_wrapper(objects):
             obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
         obj_list.append(obj_msg)         
     ros_msg.objects = obj_list
+    rospy.loginfo("publishing msg")
     return ros_msg  
 
 def local_to_map_transform(msg, tfBuffer):
@@ -207,7 +208,7 @@ def main():
     global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=1)
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=50)
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=50)
 
     tfBuffer = tf2_ros.Buffer()
