@@ -208,7 +208,7 @@ def main():
     global image_net, exit_signal, run_signal, detections, class_names
 
     # Define ROS publisher 
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=1)
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=50)
 
     tfBuffer = tf2_ros.Buffer()
