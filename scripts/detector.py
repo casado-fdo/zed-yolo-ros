@@ -226,8 +226,6 @@ def main():
 
     print("Initializing Camera...")
 
-    zed = sl.Camera()
-    print(zed.get_device_list())
     
     
     input_type = sl.InputType()
@@ -237,6 +235,8 @@ def main():
     # Create a InitParameters object and set configuration parameters
     
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
+    cameras = sl.Camera.get_device_list()
+    print(cameras)
     init_params.coordinate_units = sl.UNIT.METER
     init_params.depth_mode = sl.DEPTH_MODE.QUALITY  # QUALITY/ULTRA/PERFORMANCE
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
@@ -246,12 +246,11 @@ def main():
     init_params.camera_fps = 30
     runtime_params = sl.RuntimeParameters()
     
-    cameras = zed.get_device_list()
     if len(cameras) > 1:
-        print(f"MULTIPLE CAMERAS FOUND... -> choosing: {cameras[0].serial_number} ")
-        init_params.set_from_serial_number(cameras[0].serial_number)
-        
-        
+        print(f"MULTIPLE CAMERAS FOUND... -> choosing: {cameras[1].serial_number} ")
+        init_params.set_from_serial_number(cameras[1].serial_number)
+    
+    zed = sl.Camera()        
     status = zed.open(init_params)
 
     if status != sl.ERROR_CODE.SUCCESS:
