@@ -62,8 +62,9 @@ def render_2D(left_display, img_scale, objects, is_tracking_on):
             # Display Object label as text
             position_image = get_image_position(obj.bounding_box_2d, img_scale)
             text_position = (int(position_image[0] - 20), int(position_image[1] - 12))
-            text = "class " + str(obj.raw_label)
-            text_color = (255, 255, 255, 255)
+            # text = "class " + str(obj.raw_label)
+            text = "ID" + str(obj.id)
+            text_color = (255, 0, 0, 255)
             cv2.putText(left_display, text, text_position, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, text_color, 1)
 
             # Diplay Object distance to camera as text
