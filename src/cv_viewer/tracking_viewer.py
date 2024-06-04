@@ -33,13 +33,14 @@ def render_2D(left_display, img_scale, objects, is_tracking_on, target_object):
     overlay = left_display.copy()
 
     line_thickness = 2
-    target_color = (0, 0, 255)
+    target_color = [0, 0, 255, 255]
     for obj in objects.object_list:
         if render_object(obj, is_tracking_on):
             if obj.id == target_object:
                 base_color = target_color
-                label_text = "TARGETED!"
+                label_text = "TARGETED! \nID" + str(obj.id)
                 line_thickness = 5
+                
             else:
                 base_color = generate_color_id_u(obj.id)
                 label_text = "ID" + str(obj.id)
@@ -58,6 +59,12 @@ def render_2D(left_display, img_scale, objects, is_tracking_on, target_object):
             draw_vertical_line(left_display, bottom_left_corner, top_left_corner, base_color, line_thickness)
             draw_vertical_line(left_display, bottom_right_corner, top_right_corner, base_color, line_thickness)
 
+            # Draw an arrow pointing to the targeted object
+            if obj.id == target_object:
+                arrow_start = (int((top_left_corner[0] + top_right_corner[0]) / 2), int(top_left_corner[1] - 20))  # 20 pixels above the box
+                arrow_end = (int((top_left_corner[0] + top_right_corner[0]) / 2), int(top_left_corner[1]))
+                cv2.arrowedLine(left_display, arrow_start, arrow_end, target_color, line_thickness)
+                
             # Scaled ROI
             roi_height = int(top_right_corner[0] - top_left_corner[0])
             roi_width = int(bottom_left_corner[1] - top_left_corner[1])

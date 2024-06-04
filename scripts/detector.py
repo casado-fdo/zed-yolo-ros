@@ -20,7 +20,7 @@ import os
 import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import PointStamped
-from sensor_msgs.msg import Joy
+from std_msgs.msg import Int32
 
 lock = Lock()
 run_signal = False
@@ -35,10 +35,7 @@ import cv_viewer.tracking_viewer as cv_viewer
 current_object_id = -1
 def callback_current_object_id(data):
     global current_object_id
-    if data.data != None:
-        current_object_id = data.data
-    else:
-        current_object_id = -1
+    current_object_id = data.data
     
 
 
@@ -186,7 +183,6 @@ def ros_wrapper(objects):
             obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
         obj_list.append(obj_msg)         
     ros_msg.objects = obj_list
-    rospy.loginfo("publishing msg")
     return ros_msg  
 
 def local_to_map_transform(msg, tfBuffer):
@@ -213,11 +209,13 @@ def local_to_map_transform(msg, tfBuffer):
 
 
 def main():
-    global image_net, exit_signal, run_signal, detections, class_names
+    global image_net, exit_signal, run_signal, detections, class_names, current_object_id, current_object_id_sub
 
     # Define ROS publisher 
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=1)
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=50)
+    
+    current_object_id_sub = rospy.Subscriber('/rnet/current_object_id', Int32, callback_current_object_id, queue_size=1)
 
     tfBuffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(tfBuffer)
@@ -229,11 +227,15 @@ def main():
     print("Initializing Camera...")
 
     zed = sl.Camera()
+    print(zed.get_device_list())
+    
+    
     input_type = sl.InputType()
     if opt[1] is not None:
         input_type.set_from_svo_file(opt[1])
         
     # Create a InitParameters object and set configuration parameters
+    
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
     init_params.coordinate_units = sl.UNIT.METER
     init_params.depth_mode = sl.DEPTH_MODE.QUALITY  # QUALITY/ULTRA/PERFORMANCE
@@ -242,8 +244,14 @@ def main():
     init_params.depth_minimum_distance = 0.5
     init_params.camera_resolution = sl.RESOLUTION.HD1080
     init_params.camera_fps = 30
-
     runtime_params = sl.RuntimeParameters()
+    
+    cameras = zed.get_device_list()
+    if len(cameras) > 1:
+        print(f"MULTIPLE CAMERAS FOUND... -> choosing: {cameras[0].serial_number} ")
+        init_params.set_from_serial_number(cameras[0].serial_number)
+        
+        
     status = zed.open(init_params)
 
     if status != sl.ERROR_CODE.SUCCESS:
@@ -331,7 +339,6 @@ def main():
                 # viewer.updateData(point_cloud_render, objects)
                 # 2D rendering
                 np.copyto(image_left_ocv, image_left.get_data())
-                global current_object_id    
                 cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking, current_object_id)
                 global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
                 # Tracking view
