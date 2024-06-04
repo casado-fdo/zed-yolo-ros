@@ -32,6 +32,14 @@ CAMERA_NAME = "zed2i"
 import ogl_viewer.viewer as gl
 import cv_viewer.tracking_viewer as cv_viewer
 
+current_object_id = -1
+def callback_current_object_id(data):
+    global current_object_id
+    if data.data != None:
+        current_object_id = data.data
+    else:
+        current_object_id = -1
+    
 
 
 def xywh2abcd(xywh):
@@ -323,7 +331,8 @@ def main():
                 # viewer.updateData(point_cloud_render, objects)
                 # 2D rendering
                 np.copyto(image_left_ocv, image_left.get_data())
-                cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
+                global current_object_id    
+                cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking, current_object_id)
                 global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
                 # Tracking view
                 track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)

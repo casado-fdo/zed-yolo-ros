@@ -29,13 +29,20 @@ def get_image_position(bounding_box_image, img_scale):
     return out_position
 
 
-def render_2D(left_display, img_scale, objects, is_tracking_on):
+def render_2D(left_display, img_scale, objects, is_tracking_on, target_object):
     overlay = left_display.copy()
 
     line_thickness = 2
+    target_color = (0, 0, 255)
     for obj in objects.object_list:
         if render_object(obj, is_tracking_on):
-            base_color = generate_color_id_u(obj.id)
+            if obj.id == target_object:
+                base_color = target_color
+                label_text = "TARGETED!"
+                line_thickness = 5
+            else:
+                base_color = generate_color_id_u(obj.id)
+                label_text = "ID" + str(obj.id)
             # Display image scaled 2D bounding box
             top_left_corner = cvt(obj.bounding_box_2d[0], img_scale)
             top_right_corner = cvt(obj.bounding_box_2d[1], img_scale)
@@ -65,7 +72,7 @@ def render_2D(left_display, img_scale, objects, is_tracking_on):
             # text = "class " + str(obj.raw_label)
             text = "ID" + str(obj.id)
             text_color = (255, 0, 0, 255)
-            cv2.putText(left_display, text, text_position, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, text_color, 1)
+            cv2.putText(left_display, label_text, text_position, cv2.FONT_HERSHEY_COMPLEX_SMALL, 0.5, text_color, 1)
 
             # Diplay Object distance to camera as text
             if np.isfinite(obj.position[2]):
