@@ -144,6 +144,12 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             run_signal = False
             # cv2.imshow("ZED YOLO", img) # Display the resulting frame   
         sleep(0.001)
+        
+def print_objects_list(objects):
+    print("\objects: " + str([str(class_names[obj.raw_label]) + " (" + str(obj.id) + ")" for obj in objects.object_list]))
+
+def print_detections(detections):
+    print("\nDetections: " + str([str(det.label) for det in detections]))
 
 # Wrap data into ROS ObjectStamped message
 def ros_wrapper(objects):
@@ -268,6 +274,8 @@ def main():
 
     obj_param = sl.ObjectDetectionParameters()
     obj_param.detection_model = sl.OBJECT_DETECTION_MODEL.CUSTOM_BOX_OBJECTS
+    # obj_param.filtering_mode = sl.OBJECT_FILTERING_MODE.NMS3D_PER_CLASS
+    # obj_param.prediction_timeout_s= 0 
     obj_param.enable_tracking = True
     zed.enable_object_detection(obj_param)
 
@@ -317,12 +325,17 @@ def main():
             # Wait for detections
             lock.acquire()
             # -- Ingest detections
+            print_detections(detections)
             zed.ingest_custom_box_objects(detections)
             lock.release()
+            print("Ingested")
+            # -- Retrieve objects
+            print_objects_list(objects)
             zed.retrieve_objects(objects, obj_runtime_param)
             
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
+            print(ros_msg)
             pub_l.publish(ros_msg)
             # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
             
@@ -354,7 +367,7 @@ if __name__ == '__main__':
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
-    # parser = argparse.ArgumentParser()
+    # parser = argparse.ArgumentParser()    0
     # parser.add_argument('--model_name', type=str, default='yolov8l-oiv7', help='model path(s)')
     # parser.add_argument('--svo', type=str, default=None, help='optional svo file')
     # parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
@@ -363,7 +376,8 @@ if __name__ == '__main__':
     display = True
     train = False
     # opt = ["yolov8x-oiv7",None, 416, 0.4]    
-    opt = ["yolov8x",None, 416, 0.5]    
+    opt = ["yolov8x",None, 416, 0.55]     
+    # opt = ["yolov8x",None, 416, 0.45]    
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../data/'
     if train:
