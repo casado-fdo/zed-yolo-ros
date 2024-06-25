@@ -1,1 +1,3 @@
-# zed-yolo-ros
+# Zed + YOLO + ROS
+
+This is a simple ROS package for 3D object detection in ROS using a Zed camera coupled with any YOLO model. The camera driver runs in the Python SDK (https://github.com/stereolabs/zed-python-api) for better performance. Any available or custom version of YOLO should work (https://docs.ultralytics.com/models). The ```detector.py``` script launches the camera driver and YOLO and starts the 3D object detection using Zed's depth estimation to provide 3D bounding boxes. The detected objects are then wrapped as ROS messages ([```zed_interfaces.msg.ObjectsStamped```](https://github.com/stereolabs/zed-ros-interfaces/blob/12f55da885dd3f0f68c168d0bccd33c4e892328d/msg/ObjectsStamped.msg)) and published into the ```/od_yolo``` topic.
