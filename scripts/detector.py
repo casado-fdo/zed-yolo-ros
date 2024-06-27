@@ -126,7 +126,11 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 def ros_wrapper(objects):
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
-    ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
+
+    # When working on chair, uncomment 1st line and comment 2nd line
+    # ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
+    ros_msg.header.frame_id = CAMERA_NAME
+    
     obj_list = []
     for obj in objects.object_list:
         obj_msg = zed_msgs.Object()
