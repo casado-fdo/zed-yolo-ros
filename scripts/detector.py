@@ -21,7 +21,6 @@ import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import PointStamped
 
-#trying git again 3
 
 lock = Lock()
 run_signal = False
@@ -165,22 +164,31 @@ def ros_wrapper(objects):
 
 def local_to_map_transform(msg, tfBuffer):
     try:
-        lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME + "_left_camera_frame")
-        transform = tfBuffer.lookup_transform("map", CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+        # Uncomment when working on chair
+        # lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME + "_left_camera_frame")
+        # transform = tfBuffer.lookup_transform("map", CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
         for obj in msg.objects:
             p = PointStamped()
             p.point.x = obj.position[0]
             p.point.y = obj.position[1]
             p.point.z = obj.position[2]
-            obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
-            obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
+
+            # Uncomment 2 lines below when working on chair, comment 3rd line out
+            # obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
+            # obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
+            obj.position = [p.point.x, p.point.y, p.point.z]
+
             for corner in obj.bounding_box_3d.corners:
                 p.point.x = corner.kp[0]
                 p.point.y = corner.kp[1]
                 p.point.z = corner.kp[2]
-                corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
-                corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
-        msg.header.frame_id = "map"
+
+                # Uncomment 2 lines below when working on chair, comment 3rd line out
+                # corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
+                # corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
+                corner.kp = [p.point.x, p.point.y, p.point.z]
+
+        msg.header.frame_id = CAMERA_NAME
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
         print("Failed to transform object from local to map frame")
     return msg
