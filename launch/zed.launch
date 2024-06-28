@@ -1,6 +1,6 @@
 <launch>
   <!-- Run the detector.py script -->
-  <node name="zed-yolo-ros" pkg="zed-yolo-ros" type="detector.py" output="screen">
+  <node name="zed_yolo_ros" pkg="zed-yolo-ros" type="detector.py" output="screen">
     <!-- Add any parameters or arguments required by your script here -->
   </node>
 </launch>
