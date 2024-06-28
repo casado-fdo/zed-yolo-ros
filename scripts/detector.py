@@ -210,7 +210,7 @@ def main():
     listener = tf2_ros.TransformListener(tfBuffer)
     br = tf2_ros.TransformBroadcaster()
 
-    capture_thread = Thread(target=torch_thread, kwargs={'model_name': opt.model_name, 'img_size': opt.img_size, "conf_thres": opt.conf_thres})
+    capture_thread = Thread(target=torch_thread, kwargs={'model_name': model_name, 'img_size': img_size, "conf_thres": conf_thres})
     capture_thread.start()
 
     print("Initializing Camera...")
@@ -218,8 +218,8 @@ def main():
     zed = sl.Camera()
 
     input_type = sl.InputType()
-    if opt.svo is not None:
-        input_type.set_from_svo_file(opt.svo)
+    if svo is not None:
+        input_type.set_from_svo_file(svo)
         
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
@@ -284,12 +284,19 @@ if __name__ == '__main__':
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model_name', type=str, default='yolov8l-oiv7', help='model path(s)')
-    parser.add_argument('--svo', type=str, default=None, help='optional svo file')
-    parser.add_argument('--img_size', type=int, default=416, help='inference size (pixels)')
-    parser.add_argument('--conf_thres', type=float, default=0.4, help='object confidence threshold')
-    opt = parser.parse_args()
+    # Namespace for parameters
+    namespace = rospy.get_name() + "/"
+    
+    # Read parameters from the parameter server
+    model_name = rospy.get_param(namespace + 'model_name', 'yolov8l-oiv7')
+    svo = rospy.get_param(namespace + 'svo', None)
+    img_size = rospy.get_param(namespace + 'img_size', 416)
+    conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
+
+    rospy.loginfo(f"Model Name: {model_name}")
+    rospy.loginfo(f"SVO File: {svo}")
+    rospy.loginfo(f"Image Size: {img_size}")
+    rospy.loginfo(f"Confidence Threshold: {conf_thres}")
 
     with torch.no_grad():
         main()
