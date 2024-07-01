@@ -218,6 +218,9 @@ def main():
     zed = sl.Camera()
 
     input_type = sl.InputType()
+    # Convert empty string to None for SVO parameter
+    if svo == '':
+        svo = None
     if svo is not None:
         input_type.set_from_svo_file(svo)
         
