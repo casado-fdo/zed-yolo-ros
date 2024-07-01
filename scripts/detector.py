@@ -104,7 +104,11 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         with open(model_labels_path, 'w') as f:
             for i in range(len(class_names)):
                 f.write("%d, %s\n" % (i, class_names[i]))
-                
+
+    # Export the class names dictionary as a file
+    with open(model_labels_path, 'w') as f:
+        for i in range(len(class_names)):
+            f.write("%d, %s\n" % (i, class_names[i]))       
     # Load the model
     model = YOLO(models_path+model_name+'.pt')
 
