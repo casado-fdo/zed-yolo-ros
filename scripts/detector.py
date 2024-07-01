@@ -288,7 +288,7 @@ if __name__ == '__main__':
     namespace = rospy.get_name() + "/"
     
     # Read parameters from the parameter server
-    model_name = rospy.get_param(namespace + 'model_name', 'yolov8l-oiv7')
+    model_name = rospy.get_param(namespace + 'model_name', 'yolov8m-ch')
     svo = rospy.get_param(namespace + 'svo', None)
     img_size = rospy.get_param(namespace + 'img_size', 416)
     conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
