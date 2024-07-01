@@ -284,6 +284,7 @@ def main():
 
 
 if __name__ == '__main__':
+    global svo, img_size, conf_thres, model_name
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
