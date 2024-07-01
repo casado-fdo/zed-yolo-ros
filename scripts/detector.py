@@ -26,6 +26,11 @@ lock = Lock()
 run_signal = False
 exit_signal = False
 class_names = []
+global svo, img_size, conf_thres, model_name
+svo = None
+img_size = 416
+conf_thres = 0.4
+model_name = 'yolov8m-ch'
 
 CAMERA_NAME = "zed2i"
 
@@ -200,7 +205,7 @@ def local_to_map_transform(msg, tfBuffer):
 
 
 def main():
-    global image_net, exit_signal, run_signal, detections, class_names
+    global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name
 
     # Define ROS publisher 
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=50)
@@ -284,7 +289,6 @@ def main():
 
 
 if __name__ == '__main__':
-    global svo, img_size, conf_thres, model_name
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
