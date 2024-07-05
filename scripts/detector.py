@@ -30,6 +30,7 @@ svo = None
 img_size = 416
 conf_thres = 0.4
 model_name = 'yolov8m-ch'
+zed_location = 'free'
 
 CAMERA_NAME = "zed2i"
 
@@ -128,14 +129,18 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
 # Wrap data into ROS ObjectStamped message
 def ros_wrapper(objects):
-    global class_names
+    global class_names, zed_location
     
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
 
+    if zed_location == 'free':
+        ros_msg.header.frame_id = CAMERA_NAME
+    elif zed_location == 'chairry':
+        ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
     # When working on chair, uncomment 1st line and comment 2nd line
     # ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
-    ros_msg.header.frame_id = CAMERA_NAME
+    # ros_msg.header.frame_id = CAMERA_NAME
 
     obj_list = []
     for obj in objects.object_list:
@@ -173,33 +178,54 @@ def ros_wrapper(objects):
     return ros_msg  
 
 def local_to_map_transform(msg, tfBuffer):
+    global zed_location
     try:
+        if zed_location == 'chairry':
+            lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME)
+            transform = tfBuffer.lookup_transform("map", CAMERA_NAME, lct, rospy.Duration(0.1))
         # Uncomment when working on chair
         # lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME + "_left_camera_frame")
         # transform = tfBuffer.lookup_transform("map", CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+        
         for obj in msg.objects:
             p = PointStamped()
             p.point.x = obj.position[0]
             p.point.y = obj.position[1]
             p.point.z = obj.position[2]
 
+            if zed_location == 'chairry':
+                obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
+                obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
+            elif zed_location == 'free':
+                obj.position = [p.point.x, p.point.y, p.point.z]
             # Uncomment 2 lines below when working on chair, comment 3rd line out
             # obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
             # obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
-            obj.position = [p.point.x, p.point.y, p.point.z]
+            # obj.position = [p.point.x, p.point.y, p.point.z]
 
             for corner in obj.bounding_box_3d.corners:
                 p.point.x = corner.kp[0]
                 p.point.y = corner.kp[1]
                 p.point.z = corner.kp[2]
 
+                if zed_location == 'chairry':    
+                    corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
+                    corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
+                elif zed_location == 'free':
+                    corner.kp = [p.point.x, p.point.y, p.point.z]
                 # Uncomment 2 lines below when working on chair, comment 3rd line out
                 # corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
                 # corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
-                corner.kp = [p.point.x, p.point.y, p.point.z]
+                # corner.kp = [p.point.x, p.point.y, p.point.z]
+        
+        if zed_location == 'chairry':
+            msg.header.frame_id = "map"
+        elif zed_location == 'free':
+            msg.header.frame_id = CAMERA_NAME
         # uncomment 1st line when working on chair
         # msg.header.frame_id = "map"
-        msg.header.frame_id = CAMERA_NAME
+        # msg.header.frame_id = CAMERA_NAME
+
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
         print("Failed to transform object from local to map frame")
     return msg
@@ -301,11 +327,13 @@ if __name__ == '__main__':
     svo = rospy.get_param(namespace + 'svo', None)
     img_size = rospy.get_param(namespace + 'img_size', 416)
     conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
+    zed_location = rospy.get_param(namespace + 'zed_location', 'free')
 
     rospy.loginfo(f"Model Name: {model_name}")
     rospy.loginfo(f"SVO File: {svo}")
     rospy.loginfo(f"Image Size: {img_size}")
     rospy.loginfo(f"Confidence Threshold: {conf_thres}")
+    rospy.loginfo(f"ZED Location: {zed_location}")
 
     with torch.no_grad():
         main()
