@@ -221,7 +221,7 @@ def main():
     # Define ROS publisher 
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)
-    pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)
 
     tfBuffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(tfBuffer)
@@ -298,7 +298,7 @@ def main():
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
             pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
-            pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
+            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
     zed.close()
 
 
