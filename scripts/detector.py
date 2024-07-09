@@ -85,7 +85,7 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
     model_path = models_path+model_name+'.pt'
     model_labels_path = models_path+model_name+'_labels.txt'
 
-    # Check if the model does not exists
+    # Check if the model does not exist
     if not os.path.isfile(model_path):
         print("Model not found, downloading it...")
 
