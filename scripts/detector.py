@@ -138,9 +138,6 @@ def ros_wrapper(objects):
         ros_msg.header.frame_id = CAMERA_NAME
     elif zed_location == 'chairry':
         ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
-    # When working on chair, uncomment 1st line and comment 2nd line
-    # ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
-    # ros_msg.header.frame_id = CAMERA_NAME
 
     obj_list = []
     for obj in objects.object_list:
@@ -177,16 +174,13 @@ def ros_wrapper(objects):
     ros_msg.objects = obj_list
     return ros_msg  
 
-def local_to_map_transform(msg, tfBuffer):
+def local_to_map_transform(msg, tfBuffer, frame):
     global zed_location
     try:
         if zed_location == 'chairry':
-            lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME)
-            transform = tfBuffer.lookup_transform("map", CAMERA_NAME, lct, rospy.Duration(0.1))
-        # Uncomment when working on chair
-        # lct = tfBuffer.get_latest_common_time("map", CAMERA_NAME + "_left_camera_frame")
-        # transform = tfBuffer.lookup_transform("map", CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
-        
+            lct = tfBuffer.get_latest_common_time(frame, CAMERA_NAME)
+            transform = tfBuffer.lookup_transform(frame, CAMERA_NAME, lct, rospy.Duration(0.1))
+
         for obj in msg.objects:
             p = PointStamped()
             p.point.x = obj.position[0]
@@ -198,10 +192,6 @@ def local_to_map_transform(msg, tfBuffer):
                 obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
             elif zed_location == 'free':
                 obj.position = [p.point.x, p.point.y, p.point.z]
-            # Uncomment 2 lines below when working on chair, comment 3rd line out
-            # obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
-            # obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
-            # obj.position = [p.point.x, p.point.y, p.point.z]
 
             for corner in obj.bounding_box_3d.corners:
                 p.point.x = corner.kp[0]
@@ -213,18 +203,12 @@ def local_to_map_transform(msg, tfBuffer):
                     corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
                 elif zed_location == 'free':
                     corner.kp = [p.point.x, p.point.y, p.point.z]
-                # Uncomment 2 lines below when working on chair, comment 3rd line out
-                # corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
-                # corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
-                # corner.kp = [p.point.x, p.point.y, p.point.z]
         
         if zed_location == 'chairry':
-            msg.header.frame_id = "map"
+            msg.header.frame_id = frame
         elif zed_location == 'free':
             msg.header.frame_id = CAMERA_NAME
-        # uncomment 1st line when working on chair
-        # msg.header.frame_id = "map"
-        # msg.header.frame_id = CAMERA_NAME
+
 
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
         print("Failed to transform object from local to map frame")
@@ -232,11 +216,12 @@ def local_to_map_transform(msg, tfBuffer):
 
 
 def main():
-    global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name
+    global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location
 
     # Define ROS publisher 
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo', zed_msgs.ObjectsStamped, queue_size=50)
-    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map_frame', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)
 
     tfBuffer = tf2_ros.Buffer()
     listener = tf2_ros.TransformListener(tfBuffer)
@@ -275,8 +260,9 @@ def main():
     print("Initialized Camera")
 
     positional_tracking_parameters = sl.PositionalTrackingParameters()
-    # If the camera is static, uncomment the following line to have better performances and boxes sticked to the ground.
-    # positional_tracking_parameters.set_as_static = True
+    # If the camera is static, the following line improves performance and boxes stuck to the ground.
+    if zed_location == 'free':
+        positional_tracking_parameters.set_as_static = True
     zed.enable_positional_tracking(positional_tracking_parameters)
 
     obj_param = sl.ObjectDetectionParameters()
@@ -311,7 +297,8 @@ def main():
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
-            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
+            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
+            pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
     zed.close()
 
 
