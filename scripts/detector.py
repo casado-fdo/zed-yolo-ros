@@ -69,7 +69,7 @@ def detections_to_custom_box(detections):
         obj = sl.CustomBoxObjectData()
         obj.bounding_box_2d = xywh2abcd(xywh)
         obj.label = det.cls
-        print("Detection: ", obj.label)
+        # print("Detection: ", obj.label)
         obj.probability = det.conf
         obj.is_grounded = False
         output.append(obj)
@@ -142,7 +142,7 @@ def ros_wrapper(objects):
 
     obj_list = []
     for obj in objects.object_list:
-        print("Detected object: ", class_names[obj.raw_label])
+        # print("Detected object: ", class_names[obj.raw_label])
         obj_msg = zed_msgs.Object()
         obj_msg.label = class_names[obj.raw_label]
         obj_msg.label_id = obj.raw_label
@@ -216,6 +216,12 @@ def local_to_map_transform(msg, tfBuffer, frame):
         print("Failed to transform object from local to map frame")
     return msg
 
+def print_objects_list(objects):
+    print("\nObjects: " + str([str(class_names[obj.raw_label]) + " (" + str(obj.id) + ")" for obj in objects.object_list]))
+
+def print_detections(detections):
+    print("\nDetections: " + str([str(det.label) for det in detections]))
+
 
 def main():
     global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location
@@ -260,8 +266,8 @@ def main():
     print("Initialized Camera")
 
     positional_tracking_parameters = sl.PositionalTrackingParameters()
-    # If the camera is static, the following line improves performance and boxes stuck to the ground.
     if zed_location == 'free':
+        # improve static performance and have boxes stuck to the ground
         positional_tracking_parameters.set_as_static = True
     zed.enable_positional_tracking(positional_tracking_parameters)
 
@@ -290,8 +296,10 @@ def main():
             # Wait for detections
             lock.acquire()
             # -- Ingest detections
+            print_detections(detections)
             zed.ingest_custom_box_objects(detections)
             lock.release()
+            print_objects_list(objects)
             zed.retrieve_objects(objects, obj_runtime_param)
             
             # Publish in ROS as an ObjectStamped message
