@@ -123,7 +123,6 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
             # ZED CustomBox format (with inverse letterboxing tf applied)
             detections = detections_to_custom_box(det)
-            print(detections) #trying to determine where person box is getting left behind
             lock.release()
             run_signal = False
         sleep(0.001)
@@ -142,6 +141,7 @@ def ros_wrapper(objects):
 
     obj_list = []
     for obj in objects.object_list:
+        print("Detected object: ", class_names[obj.raw_label])
         obj_msg = zed_msgs.Object()
         obj_msg.label = class_names[obj.raw_label]
         obj_msg.label_id = obj.raw_label
