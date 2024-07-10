@@ -69,7 +69,6 @@ def detections_to_custom_box(detections):
         obj = sl.CustomBoxObjectData()
         obj.bounding_box_2d = xywh2abcd(xywh)
         obj.label = det.cls
-        print('Detected:', obj.label)
         obj.probability = det.conf
         obj.is_grounded = False
         output.append(obj)
@@ -124,6 +123,7 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
             # ZED CustomBox format (with inverse letterboxing tf applied)
             detections = detections_to_custom_box(det)
+            print(detections) #trying to determine where person box is getting left behind
             lock.release()
             run_signal = False
         sleep(0.001)
