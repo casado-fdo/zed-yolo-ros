@@ -145,38 +145,39 @@ def ros_wrapper(objects):
 
     obj_list = []
     for obj in objects.object_list:
-        # print("Detected object: ", class_names[obj.raw_label])
-        obj_msg = zed_msgs.Object()
-        obj_msg.label = class_names[obj.raw_label]
-        obj_msg.label_id = obj.raw_label
-        obj_msg.sublabel = repr(obj.id)
-        obj_msg.instance_id = obj.id
-        obj_msg.confidence = obj.confidence
-        pos = obj.position
-        obj_msg.position = [pos[0], pos[1], pos[2]]
-        pos_cov = obj.position_covariance
-        obj_msg.position_covariance = [pos_cov[0], pos_cov[1], pos_cov[2], pos_cov[3], pos_cov[4], pos_cov[5]]
-        vel = obj.velocity
-        obj_msg.velocity = [vel[0], vel[1], vel[2]]
-        obj_msg.tracking_available = True
-        if repr(obj.tracking_state) == "OFF":
-            obj_msg.tracking_state = 0
-        elif repr(obj.tracking_state) == "OK":
-            obj_msg.tracking_state = 1
-        else:
-            obj_msg.tracking_state = 2
-        bbox_3d = obj.bounding_box
-        if len(bbox_3d) == 8:
-            obj_msg.bounding_box_3d.corners[0].kp = [bbox_3d[0][0], bbox_3d[0][1], bbox_3d[0][2]]
-            obj_msg.bounding_box_3d.corners[1].kp = [bbox_3d[1][0], bbox_3d[1][1], bbox_3d[1][2]]
-            obj_msg.bounding_box_3d.corners[2].kp = [bbox_3d[2][0], bbox_3d[2][1], bbox_3d[2][2]]
-            obj_msg.bounding_box_3d.corners[3].kp = [bbox_3d[3][0], bbox_3d[3][1], bbox_3d[3][2]]
-            obj_msg.bounding_box_3d.corners[4].kp = [bbox_3d[4][0], bbox_3d[4][1], bbox_3d[4][2]]
-            obj_msg.bounding_box_3d.corners[5].kp = [bbox_3d[5][0], bbox_3d[5][1], bbox_3d[5][2]]
-            obj_msg.bounding_box_3d.corners[6].kp = [bbox_3d[6][0], bbox_3d[6][1], bbox_3d[6][2]]
-            obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
-        obj_list.append(obj_msg)         
-    ros_msg.objects = obj_list
+        if obj.raw_label == 0:
+            print("Detected object: ", class_names[obj.raw_label])
+            obj_msg = zed_msgs.Object()
+            obj_msg.label = class_names[obj.raw_label]
+            obj_msg.label_id = obj.raw_label
+            obj_msg.sublabel = repr(obj.id)
+            obj_msg.instance_id = obj.id
+            obj_msg.confidence = obj.confidence
+            pos = obj.position
+            obj_msg.position = [pos[0], pos[1], pos[2]]
+            pos_cov = obj.position_covariance
+            obj_msg.position_covariance = [pos_cov[0], pos_cov[1], pos_cov[2], pos_cov[3], pos_cov[4], pos_cov[5]]
+            vel = obj.velocity
+            obj_msg.velocity = [vel[0], vel[1], vel[2]]
+            obj_msg.tracking_available = True
+            if repr(obj.tracking_state) == "OFF":
+                obj_msg.tracking_state = 0
+            elif repr(obj.tracking_state) == "OK":
+                obj_msg.tracking_state = 1
+            else:
+                obj_msg.tracking_state = 2
+            bbox_3d = obj.bounding_box
+            if len(bbox_3d) == 8:
+                obj_msg.bounding_box_3d.corners[0].kp = [bbox_3d[0][0], bbox_3d[0][1], bbox_3d[0][2]]
+                obj_msg.bounding_box_3d.corners[1].kp = [bbox_3d[1][0], bbox_3d[1][1], bbox_3d[1][2]]
+                obj_msg.bounding_box_3d.corners[2].kp = [bbox_3d[2][0], bbox_3d[2][1], bbox_3d[2][2]]
+                obj_msg.bounding_box_3d.corners[3].kp = [bbox_3d[3][0], bbox_3d[3][1], bbox_3d[3][2]]
+                obj_msg.bounding_box_3d.corners[4].kp = [bbox_3d[4][0], bbox_3d[4][1], bbox_3d[4][2]]
+                obj_msg.bounding_box_3d.corners[5].kp = [bbox_3d[5][0], bbox_3d[5][1], bbox_3d[5][2]]
+                obj_msg.bounding_box_3d.corners[6].kp = [bbox_3d[6][0], bbox_3d[6][1], bbox_3d[6][2]]
+                obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
+            obj_list.append(obj_msg)         
+        ros_msg.objects = obj_list
     return ros_msg  
 
 def local_to_map_transform(msg, tfBuffer, frame):
@@ -283,6 +284,7 @@ def main():
     obj_param = sl.ObjectDetectionParameters()
     obj_param.detection_model = sl.OBJECT_DETECTION_MODEL.CUSTOM_BOX_OBJECTS
     obj_param.enable_tracking = True
+    obj_param.filtering_mode = sl.OBJECT_FILTERING_MODE.NONE
     zed.enable_object_detection(obj_param)
 
     objects = sl.Objects()

@@ -5,10 +5,10 @@
   <!-- Run the detector.py script -->
   <node name="zed_yolo_ros" pkg="zed_yolo_ros" type="detector.py" output="screen">
     <!-- Add parameters to be used by your script within the node namespace -->
-    <param name="model_name" value="yolov8x-ch" />
+    <param name="model_name" value="yolov8x" />
     <param name="svo" value="" />
     <param name="img_size" value="416" />
-    <param name="conf_thres" value="0.4" />
+    <param name="conf_thres" value="0.6" />
     <param name="zed_location" value="$(arg zed)" />
   </node>
 </launch>
