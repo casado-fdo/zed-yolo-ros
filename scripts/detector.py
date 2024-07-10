@@ -21,6 +21,9 @@ import tf2_ros
 import tf2_geometry_msgs
 from geometry_msgs.msg import PointStamped
 
+import ogl_viewer.viewer as gl
+import cv_viewer.tracking_viewer as cv_viewer
+
 
 lock = Lock()
 run_signal = False
@@ -212,8 +215,13 @@ def local_to_map_transform(msg, tfBuffer, frame):
             msg.header.frame_id = CAMERA_NAME
 
 
-    except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-        print("Failed to transform object from local to ", frame," frame")
+    except tf2_ros.LookupException:
+        print("Failed to transform object from local to", frame, "frame due to LookupException")
+    except tf2_ros.ConnectivityException:
+        print("Failed to transform object from local to", frame, "frame due to ConnectivityException")
+    except tf2_ros.ExtrapolationException:
+        print("Failed to transform object from local to", frame, "frame due to ExtrapolationException")
+
     return msg
 
 def print_objects_list(objects):
@@ -228,8 +236,9 @@ def main():
 
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
-    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
+    # pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
     pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)    # odom frame
+    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
 
     tfBuffer = tf2_ros.Buffer()
 
@@ -279,6 +288,30 @@ def main():
     objects = sl.Objects()
     obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
 
+    camera_infos = zed.get_camera_information()
+    camera_res = camera_infos.camera_configuration.resolution
+
+    if display:
+        # Create OpenGL viewer
+        viewer = gl.GLViewer()
+        point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
+        point_cloud_render = sl.Mat()
+        viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
+        point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
+        image_left = sl.Mat()
+        # Utilities for 2D display
+        display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
+        image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
+        image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
+
+        # Utilities for tracks view
+        camera_config = camera_infos.camera_configuration
+        tracks_resolution = sl.Resolution(400, display_resolution.height)
+        track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
+        track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
+        image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
+        # Camera pose
+        cam_w_pose = sl.Pose()
 
     while rospy.is_shutdown() is False:
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
@@ -305,8 +338,31 @@ def main():
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
-            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
+            # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
             pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
+            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+
+            if display:
+                # -- Display
+                # Retrieve display data
+                zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
+                point_cloud.copy_to(point_cloud_render)
+                zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
+                zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
+
+                # 3D rendering
+                viewer.updateData(point_cloud_render, objects)
+                # 2D rendering
+                np.copyto(image_left_ocv, image_left.get_data())
+                cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
+                global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
+                # Tracking view
+                track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
+
+                cv2.imshow("ZED | 2D View and Birds View", global_image)
+                key = cv2.waitKey(10)
+                if key == 27:
+                    break
     zed.close()
 
 
@@ -329,6 +385,8 @@ if __name__ == '__main__':
     rospy.loginfo(f"Image Size: {img_size}")
     rospy.loginfo(f"Confidence Threshold: {conf_thres}")
     rospy.loginfo(f"ZED Location: {zed_location}")
+
+    display = True
 
     with torch.no_grad():
         main()
