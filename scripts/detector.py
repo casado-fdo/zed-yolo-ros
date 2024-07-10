@@ -180,8 +180,8 @@ def local_to_map_transform(msg, tfBuffer, frame):
     global zed_location
     try:
         if zed_location == 'chairry':
-            lct = tfBuffer.get_latest_common_time(frame, CAMERA_NAME)
-            transform = tfBuffer.lookup_transform(frame, CAMERA_NAME, lct, rospy.Duration(0.1))
+            lct = tfBuffer.get_latest_common_time(frame, CAMERA_NAME + "_left_camera_frame")
+            transform = tfBuffer.lookup_transform(frame, CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
 
         for obj in msg.objects:
             p = PointStamped()
@@ -213,7 +213,7 @@ def local_to_map_transform(msg, tfBuffer, frame):
 
 
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
-        print("Failed to transform object from local to map frame")
+        print("Failed to transform object from local to ", frame," frame")
     return msg
 
 def print_objects_list(objects):
@@ -229,7 +229,7 @@ def main():
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
-    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry base link frame
+    pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)    # odom frame
 
     tfBuffer = tf2_ros.Buffer()
 
@@ -306,7 +306,7 @@ def main():
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
             pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
-            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
     zed.close()
 
 
