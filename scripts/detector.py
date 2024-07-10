@@ -69,6 +69,7 @@ def detections_to_custom_box(detections):
         obj = sl.CustomBoxObjectData()
         obj.bounding_box_2d = xywh2abcd(xywh)
         obj.label = det.cls
+        print('Detected:', obj.label)
         obj.probability = det.conf
         obj.is_grounded = False
         output.append(obj)
@@ -218,14 +219,12 @@ def local_to_map_transform(msg, tfBuffer, frame):
 def main():
     global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location
 
-    # Define ROS publisher 
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)
-    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)
-    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)
+    # Define ROS publishers
+    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
+    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
+    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry base link frame
 
     tfBuffer = tf2_ros.Buffer()
-    listener = tf2_ros.TransformListener(tfBuffer)
-    br = tf2_ros.TransformBroadcaster()
 
     capture_thread = Thread(target=torch_thread, kwargs={'model_name': model_name, 'img_size': img_size, "conf_thres": conf_thres})
     capture_thread.start()
