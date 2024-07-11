@@ -19,7 +19,8 @@ import os
 
 import tf2_ros
 import tf2_geometry_msgs
-from geometry_msgs.msg import PointStamped
+import tf
+from geometry_msgs.msg import PointStamped, TransformStamped
 
 import ogl_viewer.viewer as gl
 import cv_viewer.tracking_viewer as cv_viewer
@@ -184,8 +185,24 @@ def local_to_map_transform(msg, tfBuffer, frame):
     global zed_location
     try:
         if zed_location == 'chairry':
-            lct = tfBuffer.get_latest_common_time(frame, CAMERA_NAME + "_left_camera_frame")
-            transform = tfBuffer.lookup_transform(frame, CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+            #lct = tfBuffer.get_latest_common_time(str(frame), CAMERA_NAME + "_left_camera_frame")
+            #transform = tfBuffer.lookup_transform(str(frame), CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+            # lct = tfBuffer.get_latest_common_time("map", "zed2i_left_camera_frame")
+            # transform = tfBuffer.lookup_transform("map", "zed2i_left_camera_frame", time=lct, timeout=rospy.Duration(0.1))
+            transform = TransformStamped()
+            transform.header.stamp = rospy.Time.now()
+            transform.header.frame_id = "chairry_base_link"
+            transform.child_frame_id = "zed2i_left_camera_frame"
+            transform.transform.translation.x = -0.25
+            transform.transform.translation.y = 0.0
+            transform.transform.translation.z = 1.53
+            quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
+            transform.transform.rotation.x = quat[0]
+            transform.transform.rotation.y = quat[1]
+            transform.transform.rotation.z = quat[2]
+            transform.transform.rotation.w = quat[3]
+
+
 
         for obj in msg.objects:
             p = PointStamped()
@@ -216,8 +233,8 @@ def local_to_map_transform(msg, tfBuffer, frame):
             msg.header.frame_id = CAMERA_NAME
 
 
-    except tf2_ros.LookupException:
-        print("Failed to transform object from local to", frame, "frame due to LookupException")
+    except tf2_ros.LookupException as e:
+        print("Failed to transform object from local to", frame, "frame due to LookupException: ", e)
     except tf2_ros.ConnectivityException:
         print("Failed to transform object from local to", frame, "frame due to ConnectivityException")
     except tf2_ros.ExtrapolationException:
@@ -341,8 +358,8 @@ def main():
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
             pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
-            pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
-            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            #pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
+            #pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
 
             if display:
                 # -- Display
@@ -388,7 +405,7 @@ if __name__ == '__main__':
     rospy.loginfo(f"Confidence Threshold: {conf_thres}")
     rospy.loginfo(f"ZED Location: {zed_location}")
 
-    display = True
+    display = False
 
     with torch.no_grad():
         main()
