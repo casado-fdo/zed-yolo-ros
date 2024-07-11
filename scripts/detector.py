@@ -237,7 +237,7 @@ def main():
 
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
-    # pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
+    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
     pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)    # odom frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
 
@@ -340,7 +340,7 @@ def main():
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
             pub_l.publish(ros_msg)
-            # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
+            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
             pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
             pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
 
