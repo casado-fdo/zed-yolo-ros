@@ -12,5 +12,7 @@
   <depend>rospy</depend>
   <depend>sensor_msgs</depend>
   <depend>zed_interfaces</depend>
+  <build_depend>message_generation</build_depend>
+  <build_depend>message_runtime</build_depend>
 
 </package>

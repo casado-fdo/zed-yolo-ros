@@ -2,10 +2,9 @@
 
 import rospy
 import zed_interfaces.msg as zed_msgs
-
+import math
 import numpy as np
 
-import argparse
 import torch
 import cv2
 import pyzed.sl as sl
@@ -34,82 +33,45 @@ svo = None
 img_size = 416
 conf_thres = 0.4
 model_name = 'yolov8m-ch'
-zed_location = 'free'
+zed_location = 'detached'
+skeletons = None
 
 CAMERA_NAME = "zed2i"
 
-def xywh2abcd(xywh):
-    output = np.zeros((4, 2))
+def ingest_skeletons(skeletons):
+    pass
 
-    # Center / Width / Height -> BBox corners coordinates
-    x_min = (xywh[0] - 0.5*xywh[2]) #* im_shape[1]
-    x_max = (xywh[0] + 0.5*xywh[2]) #* im_shape[1]
-    y_min = (xywh[1] - 0.5*xywh[3]) #* im_shape[0]
-    y_max = (xywh[1] + 0.5*xywh[3]) #* im_shape[0]
-
-    # A ------ B
-    # | Object |
-    # D ------ C
-
-    output[0][0] = x_min
-    output[0][1] = y_min
-
-    output[1][0] = x_max
-    output[1][1] = y_min
-
-    output[2][0] = x_min
-    output[2][1] = y_max
-
-    output[3][0] = x_max
-    output[3][1] = y_max
-    return output
-
-def detections_to_custom_box(detections):
-    output = []
-    for i, det in enumerate(detections):
-        xywh = det.xywh[0]
-
-        # Creating ingestable objects for the ZED SDK
-        obj = sl.CustomBoxObjectData()
-        obj.bounding_box_2d = xywh2abcd(xywh)
-        obj.label = det.cls
-        # print("Detection: ", obj.label)
-        obj.probability = det.conf
-        obj.is_grounded = False
-        output.append(obj)
-    return output
-
+def get_depths(keypoints, point_cloud):
+    pass
 
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
-    global image_net, exit_signal, run_signal, detections, class_names
+    global image_np, exit_signal, run_signal, class_names, skeletons
 
-    print("Intializing Network...")
+    print("Intializing Model...")
 
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../models/'
     model_path = models_path+model_name+'.pt'
     model_labels_path = models_path+model_name+'_labels.txt'
 
-    # Check if the model does not exist
+    # Download model if not found
     if not os.path.isfile(model_path):
         print("Model not found, downloading it...")
 
         # Get the PyTorch model
         model = YOLO(model_name+'.pt')
-        class_names = model.names
-
-        # Export the model as an engine
-        #model.export(format='engine')    
+        class_names = model.names   
 
         # Copy the models into the correct directory
         shutil.copy(model_name+'.pt', models_path+model_name+'.pt')
-        #shutil.copy(model_name+'.engine', models_path+model_name+'.engine')
 
         # Export the class names dictionary as a file
         with open(model_labels_path, 'w') as f:
             for i in range(len(class_names)):
                 f.write("%d, %s\n" % (i, class_names[i]))
-      
+    
+    print("Model loading...") 
+     
     # Load the model
     model = YOLO(models_path+model_name+'.pt')
 
@@ -118,16 +80,26 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         class_names = f.read().splitlines()
     class_names = [name.split(', ')[1] for name in class_names]
 
+    print("Model loaded")
+    
     while not exit_signal:
         if run_signal:
             lock.acquire()
 
-            img = cv2.cvtColor(image_net, cv2.COLOR_BGRA2RGB)
-            # https://docs.ultralytics.com/modes/predict/#video-suffixes
-            det = model.predict(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres)[0].cpu().numpy().boxes
-
-            # ZED CustomBox format (with inverse letterboxing tf applied)
-            detections = detections_to_custom_box(det)
+            img = cv2.cvtColor(image_np, cv2.COLOR_BGRA2RGB)
+            
+            # Add show=True to display the pose estimation results (~2 Hz)
+            results = model.track(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres, persist=True, show=True, tracker="bytetrack.yaml")
+            # avoid nonetype error
+            if results[0].boxes.id is None:
+                ids = None
+                skeletons = None
+            else:
+                ids = results[0].boxes.id.int().cpu().tolist()
+                skeletons = results[0].cpu().numpy().keypoints.data
+            print("IDs: ", ids)
+            print("Results: ", skeletons)
+                
             lock.release()
             run_signal = False
         sleep(0.001)
@@ -139,7 +111,7 @@ def ros_wrapper(objects):
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
 
-    if zed_location == 'free':
+    if zed_location == 'detached':
         ros_msg.header.frame_id = CAMERA_NAME
     elif zed_location == 'chairry':
         ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
@@ -213,7 +185,7 @@ def local_to_map_transform(msg, tfBuffer, frame):
             if zed_location == 'chairry':
                 obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
                 obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
-            elif zed_location == 'free':
+            elif zed_location == 'detached':
                 obj.position = [p.point.x, p.point.y, p.point.z]
 
             for corner in obj.bounding_box_3d.corners:
@@ -224,12 +196,12 @@ def local_to_map_transform(msg, tfBuffer, frame):
                 if zed_location == 'chairry':    
                     corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
                     corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
-                elif zed_location == 'free':
+                elif zed_location == 'detached':
                     corner.kp = [p.point.x, p.point.y, p.point.z]
         
         if zed_location == 'chairry':
             msg.header.frame_id = frame
-        elif zed_location == 'free':
+        elif zed_location == 'detached':
             msg.header.frame_id = CAMERA_NAME
 
 
@@ -242,20 +214,12 @@ def local_to_map_transform(msg, tfBuffer, frame):
 
     return msg
 
-def print_objects_list(objects):
-    print("\nObjects: " + str([str(class_names[obj.raw_label]) + " (" + str(obj.id) + ")" for obj in objects.object_list]))
-
-def print_detections(detections):
-    print("\nDetections: " + str([str(det.label) for det in detections]))
-
 
 def main():
-    global image_net, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location
+    global image_np, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location, skeletons, display
 
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
-    pub_g = rospy.Publisher(CAMERA_NAME+'/od_yolo_map', zed_msgs.ObjectsStamped, queue_size=50)     # map frame
-    pub_o = rospy.Publisher(CAMERA_NAME+'/od_yolo_odom', zed_msgs.ObjectsStamped, queue_size=50)    # odom frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
 
     tfBuffer = tf2_ros.Buffer()
@@ -276,10 +240,10 @@ def main():
         
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
-    init_params.coordinate_units = sl.UNIT.METER
-    init_params.depth_mode = sl.DEPTH_MODE.ULTRA  # QUALITY
+    init_params.depth_mode = sl.DEPTH_MODE.ULTRA        # Use depth ultra mode
+    init_params.coordinate_units = sl.UNIT.MILLIMETER   # Use millimeter units (for depth measurements)
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
-    init_params.depth_maximum_distance = 50
+    init_params.depth_maximum_distance = 10.0           # Set the maximum depth distance to 10 meters
 
     runtime_params = sl.RuntimeParameters()
     status = zed.open(init_params)
@@ -288,12 +252,14 @@ def main():
         print(repr(status))
         exit()
 
-    image_left_tmp = sl.Mat()
+    # Initialise image and point cloud
+    image_left_temp = sl.Mat()
+    point_cloud = sl.Mat()
 
     print("Initialized Camera")
 
     positional_tracking_parameters = sl.PositionalTrackingParameters()
-    if zed_location == 'free':
+    if zed_location == 'detached':
         # improve static performance and have boxes stuck to the ground
         positional_tracking_parameters.set_as_static = True
     zed.enable_positional_tracking(positional_tracking_parameters)
@@ -336,8 +302,9 @@ def main():
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
             # -- Get the image
             lock.acquire()
-            zed.retrieve_image(image_left_tmp, sl.VIEW.LEFT)
-            image_net = image_left_tmp.get_data()
+            zed.retrieve_image(image_left_temp, sl.VIEW.LEFT)       # image_left_temp is a Mat object
+            image_np = image_left_temp.get_data()                   # image_np is a numpy array
+            zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA)
             lock.release()
             run_signal = True
 
@@ -345,21 +312,22 @@ def main():
             while run_signal:
                 sleep(0.001)
 
-            # Wait for detections
+            # Wait for skeleton detections
             lock.acquire()
-            # -- Ingest detections
-            print_detections(detections)
-            zed.ingest_custom_box_objects(detections)
+            
+            # -- Ingest skeletons
+            keypoints = ingest_skeletons(skeletons)
+            
+        
             lock.release()
-            print_objects_list(objects)
-            zed.retrieve_objects(objects, obj_runtime_param)
+
+            # Get depths of keypoints
+            depths = get_depths(keypoints, point_cloud)
             
             # Publish in ROS as an ObjectStamped message
-            ros_msg = ros_wrapper(objects)
-            pub_l.publish(ros_msg)
-            pub_g.publish(local_to_map_transform(ros_msg, tfBuffer, "map"))
-            #pub_o.publish(local_to_map_transform(ros_msg, tfBuffer, "odom"))
-            #pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            # ros_msg = ros_wrapper(objects)
+            # pub_l.publish(ros_msg)
+            # pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
 
             if display:
                 # -- Display
@@ -397,7 +365,7 @@ if __name__ == '__main__':
     svo = rospy.get_param(namespace + 'svo', None)
     img_size = rospy.get_param(namespace + 'img_size', 416)
     conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
-    zed_location = rospy.get_param(namespace + 'zed_location', 'free')
+    zed_location = rospy.get_param(namespace + 'zed_location', 'detached')
 
     rospy.loginfo(f"Model Name: {model_name}")
     rospy.loginfo(f"SVO File: {svo}")

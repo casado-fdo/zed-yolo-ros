@@ -10,14 +10,33 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   roslaunch
   zed_interfaces
+  message_generation
+  roscpp
+  rospy
+  std_msgs
 )
-#roslaunch_add_file_check(launch)
 
+add_message_files(
+  DIRECTORY msg
+  FILES
+  Object.msg
+  ObjectsStamped.msg
+  Skeleton3D.msg
+  Keypoint3D.msg
+)
+
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 ###################################
 ## catkin specific configuration ##
 ###################################
 
-catkin_package()
+catkin_package(
+  CATKIN_DEPENDS message_runtime roscpp rospy std_msgs
+
+)
 
 ###########
 ## Build ##
