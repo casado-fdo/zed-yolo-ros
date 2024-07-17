@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import rospy
-import zed_interfaces.msg as zed_msgs
 import math
 import numpy as np
 
@@ -20,6 +19,10 @@ import tf2_ros
 import tf2_geometry_msgs
 import tf
 from geometry_msgs.msg import PointStamped, TransformStamped
+import zed_yolo_ros.msg as zed_msgs
+from sensor_msgs.msg import PointCloud2, PointField
+import sensor_msgs.point_cloud2 as pc2
+import std_msgs.msg
 
 import ogl_viewer.viewer as gl
 import cv_viewer.tracking_viewer as cv_viewer
@@ -38,14 +41,35 @@ skeletons = None
 
 CAMERA_NAME = "zed2i"
 
-def ingest_skeletons(skeletons):
-    pass
+def ingest_skeletons(skeletons, labels, point_cloud):
+    if skeletons is None:
+        people = None
+        labels = None
+        return people, labels
+    num_people = skeletons.shape[0]
+    people = np.zeros((num_people, 17, 4))  # Assuming 17 keypoints per person
+    
+    for i in range(num_people):
+        person = skeletons[i]
+        
+        for j in range(person.shape[0]):
+            keypoint = person[j]
+            x = int(keypoint[0])
+            y = int(keypoint[1])
+            conf = keypoint[2]
+            
+            # point_cloud.get_value(x, y) returns a 3D point (x, y, z)
+            err,point_3d = point_cloud.get_value(x, y)
+            
+            people[i, j] = [point_3d[0], point_3d[1], point_3d[2], conf]
+    
+    return people, labels
 
-def get_depths(keypoints, point_cloud):
-    pass
+
+
 
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
-    global image_np, exit_signal, run_signal, class_names, skeletons
+    global image_np, exit_signal, run_signal, class_names, skeletons, ids
 
     print("Intializing Model...")
 
@@ -89,7 +113,8 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             img = cv2.cvtColor(image_np, cv2.COLOR_BGRA2RGB)
             
             # Add show=True to display the pose estimation results (~2 Hz)
-            results = model.track(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres, persist=True, show=True, tracker="bytetrack.yaml")
+            results = model.track(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres, persist=True, tracker="bytetrack.yaml")
+            
             # avoid nonetype error
             if results[0].boxes.id is None:
                 ids = None
@@ -97,15 +122,15 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             else:
                 ids = results[0].boxes.id.int().cpu().tolist()
                 skeletons = results[0].cpu().numpy().keypoints.data
-            print("IDs: ", ids)
-            print("Results: ", skeletons)
                 
             lock.release()
             run_signal = False
         sleep(0.001)
 
+
+
 # Wrap data into ROS ObjectStamped message
-def ros_wrapper(objects):
+def objects_wrapper(objects, labels):
     global class_names, zed_location
     
     ros_msg = zed_msgs.ObjectsStamped()
@@ -117,41 +142,65 @@ def ros_wrapper(objects):
         ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
 
     obj_list = []
-    for obj in objects.object_list:
-        if obj.raw_label == 0:
-            print("Detected object: ", class_names[obj.raw_label])
+    if objects is None:
+        ros_msg.objects = []
+    else:
+        for i in range(objects.shape[0]):
+            person = objects[i]
             obj_msg = zed_msgs.Object()
-            obj_msg.label = class_names[obj.raw_label]
-            obj_msg.label_id = obj.raw_label
-            obj_msg.sublabel = repr(obj.id)
-            obj_msg.instance_id = obj.id
-            obj_msg.confidence = obj.confidence
-            pos = obj.position
-            obj_msg.position = [pos[0], pos[1], pos[2]]
-            pos_cov = obj.position_covariance
-            obj_msg.position_covariance = [pos_cov[0], pos_cov[1], pos_cov[2], pos_cov[3], pos_cov[4], pos_cov[5]]
-            vel = obj.velocity
-            obj_msg.velocity = [vel[0], vel[1], vel[2]]
-            obj_msg.tracking_available = True
-            if repr(obj.tracking_state) == "OFF":
-                obj_msg.tracking_state = 0
-            elif repr(obj.tracking_state) == "OK":
-                obj_msg.tracking_state = 1
-            else:
-                obj_msg.tracking_state = 2
-            bbox_3d = obj.bounding_box
-            if len(bbox_3d) == 8:
-                obj_msg.bounding_box_3d.corners[0].kp = [bbox_3d[0][0], bbox_3d[0][1], bbox_3d[0][2]]
-                obj_msg.bounding_box_3d.corners[1].kp = [bbox_3d[1][0], bbox_3d[1][1], bbox_3d[1][2]]
-                obj_msg.bounding_box_3d.corners[2].kp = [bbox_3d[2][0], bbox_3d[2][1], bbox_3d[2][2]]
-                obj_msg.bounding_box_3d.corners[3].kp = [bbox_3d[3][0], bbox_3d[3][1], bbox_3d[3][2]]
-                obj_msg.bounding_box_3d.corners[4].kp = [bbox_3d[4][0], bbox_3d[4][1], bbox_3d[4][2]]
-                obj_msg.bounding_box_3d.corners[5].kp = [bbox_3d[5][0], bbox_3d[5][1], bbox_3d[5][2]]
-                obj_msg.bounding_box_3d.corners[6].kp = [bbox_3d[6][0], bbox_3d[6][1], bbox_3d[6][2]]
-                obj_msg.bounding_box_3d.corners[7].kp = [bbox_3d[7][0], bbox_3d[7][1], bbox_3d[7][2]]
-            obj_list.append(obj_msg)         
-        ros_msg.objects = obj_list
+            
+            obj_msg.label_id = labels[i]
+            obj_msg.position = [0,0,0]
+            obj_msg.velocity = [0,0,0]          # TODO: figure out how to update velocity
+            obj_msg.tracking_available = True   # TODO: figure out how to turn off tracking
+            obj_msg.tracking_state = 1          # TODO: figure out how to implement this
+            obj_msg.skeleton_available = True
+            
+            for j in range(person.shape[0]):
+                keypoint = person[j]
+                x = keypoint[0]
+                y = keypoint[1]
+                z = keypoint[2]
+                conf = keypoint[3]
+                obj_msg.skeleton_3d.keypoints[j].kp = [x, y, z, conf]
+                print(obj_msg.skeleton_3d.keypoints[j].kp)
+            
+            obj_list.append(obj_msg)
+            
+    ros_msg.objects = obj_list
     return ros_msg  
+
+def point_cloud_wrapper(ros_msg):
+    
+    header = std_msgs.msg.Header()
+    header.stamp = rospy.Time.now()
+    header.frame_id = CAMERA_NAME
+    
+    fields = [
+        PointField('x', 0, PointField.FLOAT32, 1),
+        PointField('y', 4, PointField.FLOAT32, 1),
+        PointField('z', 8, PointField.FLOAT32, 1),
+        PointField('rgb', 12, PointField.UINT32, 1),
+    ]
+    
+    r = 0
+    g = 0
+    b = 255
+    color = (r << 16) | (g << 8) | b
+    
+    points = []
+    for obj_msg in ros_msg.objects:
+        skeleton = obj_msg.skeleton_3d
+        for keypoint in skeleton.keypoints:
+            confidence = keypoint.kp[3]
+            kp_conf_thresh = 0.9
+            if confidence > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
+                point = [keypoint.kp[0]/1000.0, keypoint.kp[1]/1000.0, keypoint.kp[2]/1000.0, color]
+                points.append(point)
+    
+    point_cloud_msg = pc2.create_cloud(header, fields, points)
+    return point_cloud_msg
+    
 
 def local_to_map_transform(msg, tfBuffer, frame):
     global zed_location
@@ -216,12 +265,12 @@ def local_to_map_transform(msg, tfBuffer, frame):
 
 
 def main():
-    global image_np, exit_signal, run_signal, detections, class_names, svo, img_size, conf_thres, model_name, zed_location, skeletons, display
+    global image_np, exit_signal, run_signal, class_names, svo, img_size, conf_thres, model_name, zed_location, skeletons, ids, display
 
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
-
+    pub_pc = rospy.Publisher(CAMERA_NAME+'/skeleton_point_cloud', PointCloud2, queue_size=10)
     tfBuffer = tf2_ros.Buffer()
 
     capture_thread = Thread(target=torch_thread, kwargs={'model_name': model_name, 'img_size': img_size, "conf_thres": conf_thres})
@@ -243,7 +292,7 @@ def main():
     init_params.depth_mode = sl.DEPTH_MODE.ULTRA        # Use depth ultra mode
     init_params.coordinate_units = sl.UNIT.MILLIMETER   # Use millimeter units (for depth measurements)
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
-    init_params.depth_maximum_distance = 10.0           # Set the maximum depth distance to 10 meters
+    init_params.depth_maximum_distance = 10000           # Set the maximum depth distance to 10 meters
 
     runtime_params = sl.RuntimeParameters()
     status = zed.open(init_params)
@@ -316,18 +365,18 @@ def main():
             lock.acquire()
             
             # -- Ingest skeletons
-            keypoints = ingest_skeletons(skeletons)
-            
+            objects, labels = ingest_skeletons(skeletons, ids, point_cloud)
         
             lock.release()
 
-            # Get depths of keypoints
-            depths = get_depths(keypoints, point_cloud)
-            
-            # Publish in ROS as an ObjectStamped message
-            # ros_msg = ros_wrapper(objects)
-            # pub_l.publish(ros_msg)
+            # Publish in ROS as an ObjectsStamped message
+            ros_msg = objects_wrapper(objects, labels)
+            pub_l.publish(ros_msg)
             # pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            
+            # Publish a point cloud with all keypoints
+            pc_msg = point_cloud_wrapper(ros_msg)
+            pub_pc.publish(pc_msg)
 
             if display:
                 # -- Display

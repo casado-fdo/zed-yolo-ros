@@ -9,9 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   sensor_msgs
   roslaunch
-  zed_interfaces
   message_generation
-  roscpp
   rospy
   std_msgs
 )
@@ -25,18 +23,7 @@ add_message_files(
   Keypoint3D.msg
 )
 
-generate_messages(
-  DEPENDENCIES
-  std_msgs
-)
-###################################
-## catkin specific configuration ##
-###################################
 
-catkin_package(
-  CATKIN_DEPENDS message_runtime roscpp rospy std_msgs
-
-)
 
 ###########
 ## Build ##
@@ -51,6 +38,20 @@ include_directories(
 #############
 catkin_python_setup()
 
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
+
 catkin_install_python(PROGRAMS scripts/detector.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
+
+###################################
+## catkin specific configuration ##
+###################################
+
+catkin_package(
+  CATKIN_DEPENDS message_runtime rospy std_msgs
+
+)

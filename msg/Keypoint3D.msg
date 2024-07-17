@@ -1,1 +1,2 @@
-float32[3] kp
+float32[4] kp
+# x, y, z, conf

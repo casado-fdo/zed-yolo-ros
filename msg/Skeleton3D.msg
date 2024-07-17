@@ -1,21 +1,23 @@
 # Skeleton joints indices
-#        16-14   15-17
+# As if we are behind the person
+# (their left is our left)
+#          3-1   2-4
 #             \ /
 #              0
 #              |
-#       2------1------5
+#       5-------------6
 #       |    |   |    |
 #	    |    |   |    |
-#       3    |   |    6
+#       7    |   |    8
 #       |    |   |    |
 #       |    |   |    |
-#       4    8   11   7
+#       9   11   12   10
 #            |   |
 #            |   |
 #            |   |
-#            9   12
+#           13   14
 #            |   |
 #            |   |
 #            |   |
-#           10   13
-zed_interfaces/Keypoint3D[18] keypoints
+#           15   16
+zed_yolo_ros/Keypoint3D[17] keypoints
