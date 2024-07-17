@@ -30,8 +30,6 @@ import cv_viewer.tracking_viewer as cv_viewer
 
 lock = Lock()
 run_signal = False
-exit_signal = False
-class_names = []
 svo = None
 img_size = 416
 conf_thres = 0.4
@@ -42,34 +40,43 @@ skeletons = None
 CAMERA_NAME = "zed2i"
 
 def ingest_skeletons(skeletons, labels, point_cloud):
+    # Check to see if there are any skeletons
     if skeletons is None:
         people = None
         labels = None
         return people, labels
-    num_people = skeletons.shape[0]
-    people = np.zeros((num_people, 17, 4))  # Assuming 17 keypoints per person
     
+    # Create a list of people, each with 17 4-d keypoints
+    num_people = skeletons.shape[0]
+    people = np.zeros((num_people, 17, 4))
+    
+    # Iterate through the people
     for i in range(num_people):
         person = skeletons[i]
         
+        # Iterate through the keypoints
         for j in range(person.shape[0]):
             keypoint = person[j]
+
+            # Extract the keypoint's data:
+            # x, y: pixel coordinates (cast as an int)
+            # conf: confidence score
             x = int(keypoint[0])
             y = int(keypoint[1])
             conf = keypoint[2]
             
-            # point_cloud.get_value(x, y) returns a 3D point (x, y, z)
+            # Find the corresponding 3D point in the point cloud
             err,point_3d = point_cloud.get_value(x, y)
             
+            # Save the 3D point and confidence score
             people[i, j] = [point_3d[0], point_3d[1], point_3d[2], conf]
     
+    # Return the people and their IDs/labels
     return people, labels
 
 
-
-
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
-    global image_np, exit_signal, run_signal, class_names, skeletons, ids
+    global image_np, run_signal, skeletons, ids
 
     print("Intializing Model...")
 
@@ -83,55 +90,48 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         print("Model not found, downloading it...")
 
         # Get the PyTorch model
-        model = YOLO(model_name+'.pt')
-        class_names = model.names   
+        model = YOLO(model_name+'.pt')  
 
         # Copy the models into the correct directory
         shutil.copy(model_name+'.pt', models_path+model_name+'.pt')
-
-        # Export the class names dictionary as a file
-        with open(model_labels_path, 'w') as f:
-            for i in range(len(class_names)):
-                f.write("%d, %s\n" % (i, class_names[i]))
     
+    print("Model initialized")
     print("Model loading...") 
      
     # Load the model
     model = YOLO(models_path+model_name+'.pt')
 
-    # Load class names as a list
-    with open(model_labels_path, 'r') as f:
-        class_names = f.read().splitlines()
-    class_names = [name.split(', ')[1] for name in class_names]
-
     print("Model loaded")
     
-    while not exit_signal:
+    while rospy.is_shutdown() is False:
         if run_signal:
+            # Wait for an image to be grabbed from the zed camera
             lock.acquire()
 
+            # Convert the image to RGB for YOLO
             img = cv2.cvtColor(image_np, cv2.COLOR_BGRA2RGB)
             
-            # Add show=True to display the pose estimation results (~2 Hz)
+            # Get the inference from the pose model with tracking enabled
+            # Add show=True to display the pose estimation results (slows to ~2 Hz)
             results = model.track(img, save=False, imgsz=img_size, conf=conf_thres, iou=iou_thres, persist=True, tracker="bytetrack.yaml")
             
-            # avoid nonetype error
+            # Save the results
             if results[0].boxes.id is None:
                 ids = None
                 skeletons = None
             else:
                 ids = results[0].boxes.id.int().cpu().tolist()
                 skeletons = results[0].cpu().numpy().keypoints.data
-                
+
+            # Return lock for result processing in main thread
             lock.release()
             run_signal = False
         sleep(0.001)
 
 
-
 # Wrap data into ROS ObjectStamped message
 def objects_wrapper(objects, labels):
-    global class_names, zed_location
+    global zed_location
     
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
@@ -265,13 +265,13 @@ def local_to_map_transform(msg, tfBuffer, frame):
 
 
 def main():
-    global image_np, exit_signal, run_signal, class_names, svo, img_size, conf_thres, model_name, zed_location, skeletons, ids, display
+    global image_np, run_signal, svo, img_size, conf_thres, model_name, zed_location, skeletons, ids, display
 
     # Define ROS publishers
     pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
     pub_pc = rospy.Publisher(CAMERA_NAME+'/skeleton_point_cloud', PointCloud2, queue_size=10)
-    tfBuffer = tf2_ros.Buffer()
+    # tfBuffer = tf2_ros.Buffer()
 
     capture_thread = Thread(target=torch_thread, kwargs={'model_name': model_name, 'img_size': img_size, "conf_thres": conf_thres})
     capture_thread.start()
