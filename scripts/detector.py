@@ -285,10 +285,11 @@ def main():
     ##### Publishers #####
     ######################
     # Publish the objects in the zed2i & chairry_base_link frames
-    pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
-    pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
+    pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
+    pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
     # Publish the point cloud in the zed2i_left_camera_frame frame
-    pub_pc = rospy.Publisher(CAMERA_NAME+'/skeleton_point_cloud', PointCloud2, queue_size=10)
+    pub_pc_z = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/z', PointCloud2, queue_size=10)
+    pub_pc_c = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/c', PointCloud2, queue_size=10)
     
     # Confirm if this is needed
     tfBuffer = tf2_ros.Buffer()
@@ -386,12 +387,21 @@ def main():
             # Publish skeletons in ROS as a custom ObjectsStamped message
             ros_msg = objects_wrapper(objects, labels)
             pub_z.publish(ros_msg)
-            if zed_location == 'chairry':
-                pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
-            
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg)
-            pub_pc.publish(pc_msg)
+            pub_pc_z.publish(pc_msg)
+
+            # Transform the skeletons to the chairry_base_link frame
+            if zed_location == 'chairry':
+                # Publish skeletons in ROS as a custom ObjectsStamped message
+                transform_msg = local_to_map_transform(ros_msg)
+                pub_c.publish(transform_msg)
+
+                # Publish a point cloud with all keypoints for visualisation
+                pc_msg = point_cloud_wrapper(transform_msg)
+                pub_pc_c.publish(pc_msg)
+            
+            
     
     # Close the camera when the node is shutdown
     zed.close()
