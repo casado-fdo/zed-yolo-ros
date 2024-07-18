@@ -69,8 +69,6 @@ def ingest_skeletons(skeletons, labels, point_cloud):
     return people, labels
 
 # Perform YOLO pose detection
-# TODO:
-# - confirm if while loop runs properly
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
     global image_np, run_signal, skeletons, ids
 
@@ -92,11 +90,10 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         shutil.copy(model_name+'.pt', models_path+model_name+'.pt')
     
     print("Model initialized")
-    print("Model loading...") 
-     
-    # Load the model
-    model = YOLO(models_path+model_name+'.pt')
 
+    # Load the model
+    print("Model loading...") 
+    model = YOLO(models_path+model_name+'.pt')
     print("Model loaded")
     
     while rospy.is_shutdown() is False:
@@ -166,8 +163,6 @@ def objects_wrapper(objects, labels):
     return ros_msg  
 
 # Wrap skeleton data into ROS PointCloud2 message for RViz Visualisation
-# TODO: 
-# - confirm if point cloud publishes properly
 def point_cloud_wrapper(ros_msg):
     # Create a header
     header = std_msgs.msg.Header()
@@ -191,7 +186,7 @@ def point_cloud_wrapper(ros_msg):
     # Define the confidence threshold for keypoints
     #   This can be quite high-- when the keypoint is visible in 
     #   the image, the confidence is usually ~0.95 or higher
-    kp_conf_thresh = 0.9
+    kp_conf_thresh = 0.95
 
     # Display all valid keypoints
     points = []
@@ -281,7 +276,6 @@ def local_to_map_transform(msg, tfBuffer, frame):
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
 # TODO:
 # - confirm if tfBuffer is needed
-# - confirm if point cloud publishes properly
 # - clean up code
 # - add comments
 def main():
@@ -413,7 +407,6 @@ if __name__ == '__main__':
     img_size = rospy.get_param(namespace + 'img_size', 416)
     conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
     zed_location = rospy.get_param(namespace + 'zed_location', 'detached')
-
     rospy.loginfo(f"Model Name: {model_name}")
     rospy.loginfo(f"Image Size: {img_size}")
     rospy.loginfo(f"Confidence Threshold: {conf_thres}")
