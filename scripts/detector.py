@@ -32,6 +32,11 @@ skeletons = None
 
 CAMERA_NAME = "zed2i"
 
+# Define the confidence threshold for keypoints
+    #   This can be quite high-- when the keypoint is visible in 
+    #   the image, the confidence is usually ~0.95 or higher
+kp_conf_thresh = 0.95
+
 # Convert 2-D Pose keypoints to 3-D points
 def ingest_skeletons(skeletons, labels, point_cloud):
     # Check to see if there are any skeletons
@@ -122,8 +127,13 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         sleep(0.001)
 
 # Wrap skeleton data into ROS ObjectStamped message
-def objects_wrapper(objects, labels):
-    global zed_location
+# TODO:
+# - find current position
+# - find current velocity
+# - find tracking state
+# - update tracking state
+def objects_wrapper(objects, labels, pose_history):
+    global zed_location, kp_conf_thresh
     
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
@@ -133,6 +143,13 @@ def objects_wrapper(objects, labels):
     elif zed_location == 'chairry':
         ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
 
+    # Clean pose history of any ids that are no longer present
+    for i in range(len(pose_history)):
+        id = pose_history[i][0]
+        if id not in labels:
+            # Remove the id's entry from the pose history
+            pose_history.pop(i)
+
     obj_list = []
     if objects is None:
         ros_msg.objects = []
@@ -140,14 +157,10 @@ def objects_wrapper(objects, labels):
         for i in range(objects.shape[0]):
             person = objects[i]
             obj_msg = zed_msgs.Object()
-            
             obj_msg.label_id = labels[i]
-            obj_msg.position = [0,0,0]
-            obj_msg.velocity = [0,0,0]          # TODO: figure out how to update velocity
-            obj_msg.tracking_available = True   # TODO: figure out how to turn off tracking
-            obj_msg.tracking_state = 1          # TODO: figure out how to implement this
-            obj_msg.skeleton_available = True
+
             
+            position = [0,0,0]
             for j in range(person.shape[0]):
                 keypoint = person[j]
                 x = keypoint[0]
@@ -155,15 +168,45 @@ def objects_wrapper(objects, labels):
                 z = keypoint[2]
                 conf = keypoint[3]
                 obj_msg.skeleton_3d.keypoints[j].kp = [x, y, z, conf]
-                print(obj_msg.skeleton_3d.keypoints[j].kp)
-            
+                # print(obj_msg.skeleton_3d.keypoints[j].kp)
+
+                # Sum the average position
+                # Only add the keypoint if:
+                # - the confidence is above the confidence threshold
+                # - the keypoint is finite (not inf, -inf, nor NaN)
+                # - the keypoint is not at the origin (sign of an error)
+                num_kps = 0
+                if conf > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
+                    position[0] += x
+                    position[1] += y
+                    position[2] += z
+                    num_kps +=1
+
+            # Calculate the average position
+            obj_msg.position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
+
+            # Get index of the person in the pose history
+            # pose_history = [[id, [x, y, z]], [id, [x, y, z]], ...]
+            id = labels[i]
+            if id in pose_history:
+                index = pose_history.index(id)
+                old_pose = pose_history[index][1]
+                new_pose = obj_msg.position
+                # Calculate velocity
+                obj_msg.velocity = [new_pose[0] - old_pose[0], new_pose[1] - old_pose[1], new_pose[2] - old_pose[2]]
+
+                # Save new pose in pose history at same index (replace old pose)
+                pose_history[index] = [id, new_pose]
+
             obj_list.append(obj_msg)
             
     ros_msg.objects = obj_list
-    return ros_msg  
+    return ros_msg, pose_history  
 
 # Wrap skeleton data into ROS PointCloud2 message for RViz Visualisation
 def point_cloud_wrapper(ros_msg):
+    global kp_conf_thresh
+
     # Create a header
     header = std_msgs.msg.Header()
     header.stamp = rospy.Time.now()
@@ -177,20 +220,22 @@ def point_cloud_wrapper(ros_msg):
         PointField('rgb', 12, PointField.UINT32, 1),
     ]
     
-    # Set the color of the points to blue (arbitrary choice)
+    # Set the color of the keypoints to blue (arbitrary choice)
     r = 0
     g = 0
     b = 255
-    color = (r << 16) | (g << 8) | b
-    
-    # Define the confidence threshold for keypoints
-    #   This can be quite high-- when the keypoint is visible in 
-    #   the image, the confidence is usually ~0.95 or higher
-    kp_conf_thresh = 0.95
+    blue = (r << 16) | (g << 8) | b
 
-    # Display all valid keypoints
+     # Set the color of the position to black (arbitrary choice)
+    r = 255
+    g = 255
+    b = 255
+    black = (r << 16) | (g << 8) | b
+
+    # Display all valid keypoints & skeleton's position
     points = []
     for obj_msg in ros_msg.objects:
+        # Display the keypoints of the skeleton
         skeleton = obj_msg.skeleton_3d
         for keypoint in skeleton.keypoints:
             confidence = keypoint.kp[3]
@@ -201,25 +246,21 @@ def point_cloud_wrapper(ros_msg):
             # - the keypoint is not at the origin (sign of an error)
             if confidence > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
                 # Convert point coordinates from millimeters to meters
-                point = [keypoint.kp[0]/1000.0, keypoint.kp[1]/1000.0, keypoint.kp[2]/1000.0, color]
+                point = [keypoint.kp[0]/1000.0, keypoint.kp[1]/1000.0, keypoint.kp[2]/1000.0, blue]
                 points.append(point)
+
+        # Display the position of the skeleton
+        pose = obj_msg.position
+        point = [pose[0], pose[1], pose[2], black]
     
     point_cloud_msg = pc2.create_cloud(header, fields, points)
     return point_cloud_msg
     
 # Transform skeleton data from local to map frame
-# TODO: 
-# - confirm if tfBuffer is needed
-# - clean up code
-# - add comments
 def local_to_map_transform(ros_msg):
     try:
-        #lct = tfBuffer.get_latest_common_time(str(frame), CAMERA_NAME + "_left_camera_frame")
-        #transform = tfBuffer.lookup_transform(str(frame), CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
-        # lct = tfBuffer.get_latest_common_time("map", "zed2i_left_camera_frame")
-        # transform = tfBuffer.lookup_transform("map", "zed2i_left_camera_frame", time=lct, timeout=rospy.Duration(0.1))
-        
         # Create a transform from chairry_base_link to zed2i_left_camera_frame
+        # Hard-coded because tfBuffer wasn't working
         transform = TransformStamped()
         transform.header.stamp = rospy.Time.now()
         transform.header.frame_id = "chairry_base_link"
@@ -274,10 +315,6 @@ def local_to_map_transform(ros_msg):
     return ros_msg
 
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
-# TODO:
-# - confirm if tfBuffer is needed
-# - clean up code
-# - add comments
 def main():
     global image_np, run_signal, img_size, conf_thres, model_name, zed_location, skeletons, ids
 
@@ -290,9 +327,6 @@ def main():
     # Publish the point cloud in the zed2i_left_camera_frame frame
     pub_pc_z = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/z', PointCloud2, queue_size=10)
     pub_pc_c = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/c', PointCloud2, queue_size=10)
-    
-    # Confirm if this is needed
-    tfBuffer = tf2_ros.Buffer()
 
     ###################
     ##### Threads #####
@@ -329,36 +363,22 @@ def main():
     print("Initialized Camera")
 
 
-    # positional_tracking_parameters = sl.PositionalTrackingParameters()
-    # if zed_location == 'detached':
-    #     # improve static performance and have boxes stuck to the ground
-    #     positional_tracking_parameters.set_as_static = True
-    # zed.enable_positional_tracking(positional_tracking_parameters)
-
-    # obj_param = sl.ObjectDetectionParameters()
-    # obj_param.detection_model = sl.OBJECT_DETECTION_MODEL.CUSTOM_BOX_OBJECTS
-    # obj_param.enable_tracking = True
-    # obj_param.filtering_mode = sl.OBJECT_FILTERING_MODE.NONE
-    # zed.enable_object_detection(obj_param)
-
-    # objects = sl.Objects()
-    # obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
-
-    # camera_infos = zed.get_camera_information()
-    # camera_res = camera_infos.camera_configuration.resolution
-
-
     #######################################
     ##### Get, Ingest, & Publish Data #####
     #######################################
 
-    # Initialise image and point cloud
+    # Initialise image, point cloud, and pose history
     image_left_temp = sl.Mat()
     point_cloud = sl.Mat()
+    pose_history = []
 
     while rospy.is_shutdown() is False:
         # Grab data from the camera
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
+
+            ####################
+            ##### Get Data #####
+            ####################
             # Wait for previous iteration to finish
             lock.acquire()
 
@@ -375,6 +395,10 @@ def main():
             while run_signal:
                 sleep(0.001)
 
+
+            #######################
+            ##### Ingest Data #####
+            #######################
             # Wait for skeleton detections
             lock.acquire()
             
@@ -384,8 +408,12 @@ def main():
             # Release the lock for the next iteration
             lock.release()
 
+
+            ########################
+            ##### Publish Data #####
+            ########################
             # Publish skeletons in ROS as a custom ObjectsStamped message
-            ros_msg = objects_wrapper(objects, labels)
+            ros_msg, pose_history = objects_wrapper(objects, labels, pose_history)
             pub_z.publish(ros_msg)
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg)
