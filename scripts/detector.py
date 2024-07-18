@@ -3,18 +3,14 @@
 import rospy
 import math
 import numpy as np
-
 import torch
 import cv2
 import pyzed.sl as sl
 from ultralytics import YOLO
-
 from threading import Lock, Thread
 from time import sleep
-
 import shutil
 import os
-
 import tf2_ros
 import tf2_geometry_msgs
 import tf
@@ -24,21 +20,19 @@ from sensor_msgs.msg import PointCloud2, PointField
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 
-import ogl_viewer.viewer as gl
-import cv_viewer.tracking_viewer as cv_viewer
 
 
 lock = Lock()
 run_signal = False
-svo = None
 img_size = 416
 conf_thres = 0.4
-model_name = 'yolov8m-ch'
+model_name = 'yolov8m-pose'
 zed_location = 'detached'
 skeletons = None
 
 CAMERA_NAME = "zed2i"
 
+# Convert 2-D Pose keypoints to 3-D points
 def ingest_skeletons(skeletons, labels, point_cloud):
     # Check to see if there are any skeletons
     if skeletons is None:
@@ -74,7 +68,9 @@ def ingest_skeletons(skeletons, labels, point_cloud):
     # Return the people and their IDs/labels
     return people, labels
 
-
+# Perform YOLO pose detection
+# TODO:
+# - confirm if while loop runs properly
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
     global image_np, run_signal, skeletons, ids
 
@@ -128,8 +124,7 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
             run_signal = False
         sleep(0.001)
 
-
-# Wrap data into ROS ObjectStamped message
+# Wrap skeleton data into ROS ObjectStamped message
 def objects_wrapper(objects, labels):
     global zed_location
     
@@ -170,12 +165,16 @@ def objects_wrapper(objects, labels):
     ros_msg.objects = obj_list
     return ros_msg  
 
+# Wrap skeleton data into ROS PointCloud2 message for RViz Visualisation
+# TODO: 
+# - confirm if point cloud publishes properly
 def point_cloud_wrapper(ros_msg):
-    
+    # Create a header
     header = std_msgs.msg.Header()
     header.stamp = rospy.Time.now()
-    header.frame_id = CAMERA_NAME
+    header.frame_id = CAMERA_NAME + "_left_camera_frame"
     
+    # Define the fields
     fields = [
         PointField('x', 0, PointField.FLOAT32, 1),
         PointField('y', 4, PointField.FLOAT32, 1),
@@ -183,25 +182,41 @@ def point_cloud_wrapper(ros_msg):
         PointField('rgb', 12, PointField.UINT32, 1),
     ]
     
+    # Set the color of the points to blue (arbitrary choice)
     r = 0
     g = 0
     b = 255
     color = (r << 16) | (g << 8) | b
     
+    # Define the confidence threshold for keypoints
+    #   This can be quite high-- when the keypoint is visible in 
+    #   the image, the confidence is usually ~0.95 or higher
+    kp_conf_thresh = 0.9
+
+    # Display all valid keypoints
     points = []
     for obj_msg in ros_msg.objects:
         skeleton = obj_msg.skeleton_3d
         for keypoint in skeleton.keypoints:
             confidence = keypoint.kp[3]
-            kp_conf_thresh = 0.9
+
+            # Only add the keypoint if:
+            # - the confidence is above the confidence threshold
+            # - the keypoint is finite (not inf, -inf, nor NaN)
+            # - the keypoint is not at the origin (sign of an error)
             if confidence > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
+                # Convert point coordinates from millimeters to meters
                 point = [keypoint.kp[0]/1000.0, keypoint.kp[1]/1000.0, keypoint.kp[2]/1000.0, color]
                 points.append(point)
     
     point_cloud_msg = pc2.create_cloud(header, fields, points)
     return point_cloud_msg
     
-
+# Transform skeleton data from local to map frame
+# TODO: 
+# - confirm if tfBuffer is needed
+# - clean up code
+# - add comments
 def local_to_map_transform(msg, tfBuffer, frame):
     global zed_location
     try:
@@ -263,29 +278,45 @@ def local_to_map_transform(msg, tfBuffer, frame):
 
     return msg
 
-
+# Receive data from zed camera, ingest YOLO pose detections, and publish the results
+# TODO:
+# - confirm if tfBuffer is needed
+# - confirm if point cloud publishes properly
+# - clean up code
+# - add comments
 def main():
-    global image_np, run_signal, svo, img_size, conf_thres, model_name, zed_location, skeletons, ids, display
+    global image_np, run_signal, img_size, conf_thres, model_name, zed_location, skeletons, ids
 
-    # Define ROS publishers
-    pub_l = rospy.Publisher(CAMERA_NAME+'/od_yolo_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
-    pub_c = rospy.Publisher(CAMERA_NAME+'/od_yolo_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry frame
+    ######################
+    ##### Publishers #####
+    ######################
+    # Publish the objects in the zed2i & chairry_base_link frames
+    pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons_zed2i', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
+    pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons_cbl', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
+    # Publish the point cloud in the zed2i_left_camera_frame frame
     pub_pc = rospy.Publisher(CAMERA_NAME+'/skeleton_point_cloud', PointCloud2, queue_size=10)
+    
+    # Confirm if this is needed
     # tfBuffer = tf2_ros.Buffer()
 
+    ###################
+    ##### Threads #####
+    ###################
+    # Start YOLO pose detection thread
     capture_thread = Thread(target=torch_thread, kwargs={'model_name': model_name, 'img_size': img_size, "conf_thres": conf_thres})
     capture_thread.start()
 
+
+    #####################################
+    ##### ZED Camera Initialisation #####
+    #####################################
+    # Initialize ZED camera
     print("Initializing Camera...")
 
+    # Initialize parameters
     zed = sl.Camera()
-
     input_type = sl.InputType()
-    # Convert empty string to None for SVO parameter
-    if svo == '':
-        svo = None
-    if svo is not None:
-        input_type.set_from_svo_file(svo)
+    runtime_params = sl.RuntimeParameters()
         
     # Create a InitParameters object and set configuration parameters
     init_params = sl.InitParameters(input_t=input_type, svo_real_time_mode=True)
@@ -294,135 +325,99 @@ def main():
     init_params.coordinate_system = sl.COORDINATE_SYSTEM.RIGHT_HANDED_Z_UP_X_FWD
     init_params.depth_maximum_distance = 10000           # Set the maximum depth distance to 10 meters
 
-    runtime_params = sl.RuntimeParameters()
+    # Try opening the camera, print error code if unsuccessful
     status = zed.open(init_params)
-
     if status != sl.ERROR_CODE.SUCCESS:
         print(repr(status))
         exit()
+
+    print("Initialized Camera")
+
+
+    # positional_tracking_parameters = sl.PositionalTrackingParameters()
+    # if zed_location == 'detached':
+    #     # improve static performance and have boxes stuck to the ground
+    #     positional_tracking_parameters.set_as_static = True
+    # zed.enable_positional_tracking(positional_tracking_parameters)
+
+    # obj_param = sl.ObjectDetectionParameters()
+    # obj_param.detection_model = sl.OBJECT_DETECTION_MODEL.CUSTOM_BOX_OBJECTS
+    # obj_param.enable_tracking = True
+    # obj_param.filtering_mode = sl.OBJECT_FILTERING_MODE.NONE
+    # zed.enable_object_detection(obj_param)
+
+    # objects = sl.Objects()
+    # obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
+
+    # camera_infos = zed.get_camera_information()
+    # camera_res = camera_infos.camera_configuration.resolution
+
+
+    #######################################
+    ##### Get, Ingest, & Publish Data #####
+    #######################################
 
     # Initialise image and point cloud
     image_left_temp = sl.Mat()
     point_cloud = sl.Mat()
 
-    print("Initialized Camera")
-
-    positional_tracking_parameters = sl.PositionalTrackingParameters()
-    if zed_location == 'detached':
-        # improve static performance and have boxes stuck to the ground
-        positional_tracking_parameters.set_as_static = True
-    zed.enable_positional_tracking(positional_tracking_parameters)
-
-    obj_param = sl.ObjectDetectionParameters()
-    obj_param.detection_model = sl.OBJECT_DETECTION_MODEL.CUSTOM_BOX_OBJECTS
-    obj_param.enable_tracking = True
-    obj_param.filtering_mode = sl.OBJECT_FILTERING_MODE.NONE
-    zed.enable_object_detection(obj_param)
-
-    objects = sl.Objects()
-    obj_runtime_param = sl.ObjectDetectionRuntimeParameters()
-
-    camera_infos = zed.get_camera_information()
-    camera_res = camera_infos.camera_configuration.resolution
-
-    if display:
-        # Create OpenGL viewer
-        viewer = gl.GLViewer()
-        point_cloud_res = sl.Resolution(min(camera_res.width, 720), min(camera_res.height, 404))
-        point_cloud_render = sl.Mat()
-        viewer.init(camera_infos.camera_model, point_cloud_res, obj_param.enable_tracking)
-        point_cloud = sl.Mat(point_cloud_res.width, point_cloud_res.height, sl.MAT_TYPE.F32_C4, sl.MEM.CPU)
-        image_left = sl.Mat()
-        # Utilities for 2D display
-        display_resolution = sl.Resolution(min(camera_res.width, 1280), min(camera_res.height, 720))
-        image_scale = [display_resolution.width / camera_res.width, display_resolution.height / camera_res.height]
-        image_left_ocv = np.full((display_resolution.height, display_resolution.width, 4), [245, 239, 239, 255], np.uint8)
-
-        # Utilities for tracks view
-        camera_config = camera_infos.camera_configuration
-        tracks_resolution = sl.Resolution(400, display_resolution.height)
-        track_view_generator = cv_viewer.TrackingViewer(tracks_resolution, camera_config.fps, init_params.depth_maximum_distance)
-        track_view_generator.set_camera_calibration(camera_config.calibration_parameters)
-        image_track_ocv = np.zeros((tracks_resolution.height, tracks_resolution.width, 4), np.uint8)
-        # Camera pose
-        cam_w_pose = sl.Pose()
-
     while rospy.is_shutdown() is False:
+        # Grab data from the camera
         if zed.grab(runtime_params) == sl.ERROR_CODE.SUCCESS:
-            # -- Get the image
+            # Wait for previous iteration to finish
             lock.acquire()
+
+            # Retrieve the image
             zed.retrieve_image(image_left_temp, sl.VIEW.LEFT)       # image_left_temp is a Mat object
-            image_np = image_left_temp.get_data()                   # image_np is a numpy array
+            image_np = image_left_temp.get_data()                   # image_np is a numpy array (formatting for YOLO)
+            
+            # Retrieve the point cloud
             zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA)
+
+            # Release the lock for YOLO thread to use
             lock.release()
             run_signal = True
-
-            # -- Detection running on the other thread
             while run_signal:
                 sleep(0.001)
 
             # Wait for skeleton detections
             lock.acquire()
             
-            # -- Ingest skeletons
+            # Ingest the skeletons and their IDs
             objects, labels = ingest_skeletons(skeletons, ids, point_cloud)
         
+            # Release the lock for the next iteration
             lock.release()
 
-            # Publish in ROS as an ObjectsStamped message
+            # Publish skeletons in ROS as a custom ObjectsStamped message
             ros_msg = objects_wrapper(objects, labels)
-            pub_l.publish(ros_msg)
+            pub_z.publish(ros_msg)
             # pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
             
-            # Publish a point cloud with all keypoints
+            # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg)
             pub_pc.publish(pc_msg)
-
-            if display:
-                # -- Display
-                # Retrieve display data
-                zed.retrieve_measure(point_cloud, sl.MEASURE.XYZRGBA, sl.MEM.CPU, point_cloud_res)
-                point_cloud.copy_to(point_cloud_render)
-                zed.retrieve_image(image_left, sl.VIEW.LEFT, sl.MEM.CPU, display_resolution)
-                zed.get_position(cam_w_pose, sl.REFERENCE_FRAME.WORLD)
-
-                # 3D rendering
-                viewer.updateData(point_cloud_render, objects)
-                # 2D rendering
-                np.copyto(image_left_ocv, image_left.get_data())
-                cv_viewer.render_2D(image_left_ocv, image_scale, objects, obj_param.enable_tracking)
-                global_image = cv2.hconcat([image_left_ocv, image_track_ocv])
-                # Tracking view
-                track_view_generator.generate_view(objects, cam_w_pose, image_track_ocv, objects.is_tracked)
-
-                cv2.imshow("ZED | 2D View and Birds View", global_image)
-                key = cv2.waitKey(10)
-                if key == 27:
-                    break
+    
+    # Close the camera when the node is shutdown
     zed.close()
 
 
 if __name__ == '__main__':
+    # Initialize the node
     rospy.init_node("zed_yolo_ros", anonymous=False)
     rospy.loginfo("ZED YOLO node started")
     
-    # Namespace for parameters
-    namespace = rospy.get_name() + "/"
-    
     # Read parameters from the parameter server
-    model_name = rospy.get_param(namespace + 'model_name', 'yolov8m-ch')
-    svo = rospy.get_param(namespace + 'svo', None)
+    namespace = rospy.get_name() + "/"
+    model_name = rospy.get_param(namespace + 'model_name', 'yolov8m-pose')
     img_size = rospy.get_param(namespace + 'img_size', 416)
     conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
     zed_location = rospy.get_param(namespace + 'zed_location', 'detached')
 
     rospy.loginfo(f"Model Name: {model_name}")
-    rospy.loginfo(f"SVO File: {svo}")
     rospy.loginfo(f"Image Size: {img_size}")
     rospy.loginfo(f"Confidence Threshold: {conf_thres}")
     rospy.loginfo(f"ZED Location: {zed_location}")
-
-    display = False
 
     with torch.no_grad():
         main()
