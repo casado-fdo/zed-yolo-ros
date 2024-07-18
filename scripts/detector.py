@@ -225,7 +225,7 @@ def local_to_map_transform(msg, tfBuffer, frame):
             transform.header.frame_id = "chairry_base_link"
             transform.child_frame_id = "zed2i_left_camera_frame"
             transform.transform.translation.x = -0.25
-            transform.transform.translation.y = 0.0
+            transform.transform.translation.y = 0.25
             transform.transform.translation.z = 1.53
             quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
             transform.transform.rotation.x = quat[0]
@@ -291,7 +291,7 @@ def main():
     pub_pc = rospy.Publisher(CAMERA_NAME+'/skeleton_point_cloud', PointCloud2, queue_size=10)
     
     # Confirm if this is needed
-    # tfBuffer = tf2_ros.Buffer()
+    tfBuffer = tf2_ros.Buffer()
 
     ###################
     ##### Threads #####
@@ -386,7 +386,7 @@ def main():
             # Publish skeletons in ROS as a custom ObjectsStamped message
             ros_msg = objects_wrapper(objects, labels)
             pub_z.publish(ros_msg)
-            # pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
             
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg)
