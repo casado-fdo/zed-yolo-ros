@@ -212,66 +212,66 @@ def point_cloud_wrapper(ros_msg):
 # - confirm if tfBuffer is needed
 # - clean up code
 # - add comments
-def local_to_map_transform(msg, tfBuffer, frame):
-    global zed_location
+def local_to_map_transform(ros_msg):
     try:
-        if zed_location == 'chairry':
-            #lct = tfBuffer.get_latest_common_time(str(frame), CAMERA_NAME + "_left_camera_frame")
-            #transform = tfBuffer.lookup_transform(str(frame), CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
-            # lct = tfBuffer.get_latest_common_time("map", "zed2i_left_camera_frame")
-            # transform = tfBuffer.lookup_transform("map", "zed2i_left_camera_frame", time=lct, timeout=rospy.Duration(0.1))
-            transform = TransformStamped()
-            transform.header.stamp = rospy.Time.now()
-            transform.header.frame_id = "chairry_base_link"
-            transform.child_frame_id = "zed2i_left_camera_frame"
-            transform.transform.translation.x = -0.25
-            transform.transform.translation.y = 0.25
-            transform.transform.translation.z = 1.53
-            quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
-            transform.transform.rotation.x = quat[0]
-            transform.transform.rotation.y = quat[1]
-            transform.transform.rotation.z = quat[2]
-            transform.transform.rotation.w = quat[3]
-
-
-
-        for obj in msg.objects:
-            p = PointStamped()
-            p.point.x = obj.position[0]
-            p.point.y = obj.position[1]
-            p.point.z = obj.position[2]
-
-            if zed_location == 'chairry':
-                obj.position = tf2_geometry_msgs.do_transform_point(p, transform)
-                obj.position = [obj.position.point.x, obj.position.point.y, obj.position.point.z]
-            elif zed_location == 'detached':
-                obj.position = [p.point.x, p.point.y, p.point.z]
-
-            for corner in obj.bounding_box_3d.corners:
-                p.point.x = corner.kp[0]
-                p.point.y = corner.kp[1]
-                p.point.z = corner.kp[2]
-
-                if zed_location == 'chairry':    
-                    corner.kp = tf2_geometry_msgs.do_transform_point(p, transform)
-                    corner.kp = [corner.kp.point.x, corner.kp.point.y, corner.kp.point.z]
-                elif zed_location == 'detached':
-                    corner.kp = [p.point.x, p.point.y, p.point.z]
+        #lct = tfBuffer.get_latest_common_time(str(frame), CAMERA_NAME + "_left_camera_frame")
+        #transform = tfBuffer.lookup_transform(str(frame), CAMERA_NAME + "_left_camera_frame", lct, rospy.Duration(0.1))
+        # lct = tfBuffer.get_latest_common_time("map", "zed2i_left_camera_frame")
+        # transform = tfBuffer.lookup_transform("map", "zed2i_left_camera_frame", time=lct, timeout=rospy.Duration(0.1))
         
-        if zed_location == 'chairry':
-            msg.header.frame_id = frame
-        elif zed_location == 'detached':
-            msg.header.frame_id = CAMERA_NAME
+        # Create a transform from chairry_base_link to zed2i_left_camera_frame
+        transform = TransformStamped()
+        transform.header.stamp = rospy.Time.now()
+        transform.header.frame_id = "chairry_base_link"
+        transform.child_frame_id = "zed2i_left_camera_frame"
+        transform.transform.translation.x = -0.25
+        transform.transform.translation.y = 0.25
+        transform.transform.translation.z = 1.53
+        quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
+        transform.transform.rotation.x = quat[0]
+        transform.transform.rotation.y = quat[1]
+        transform.transform.rotation.z = quat[2]
+        transform.transform.rotation.w = quat[3]
 
+        for obj_msg in ros_msg.objects:
+            # Transform position
+            orig_pose = PointStamped()
+            orig_pose.point.x = obj_msg.position[0]
+            orig_pose.point.y = obj_msg.position[1]
+            orig_pose.point.z = obj_msg.position[2]
 
-    except tf2_ros.LookupException as e:
-        print("Failed to transform object from local to", frame, "frame due to LookupException: ", e)
-    except tf2_ros.ConnectivityException:
-        print("Failed to transform object from local to", frame, "frame due to ConnectivityException")
-    except tf2_ros.ExtrapolationException:
-        print("Failed to transform object from local to", frame, "frame due to ExtrapolationException")
+            new_pose = tf2_geometry_msgs.do_transform_point(orig_pose, transform)
+            obj_msg.position = [new_pose.point.x, new_pose.point.y, new_pose.point.z]
 
-    return msg
+            # Transform velocity
+            orig_vel = PointStamped()
+            orig_vel.point.x = obj_msg.velocity[0]
+            orig_vel.point.y = obj_msg.velocity[1]
+            orig_vel.point.z = obj_msg.velocity[2]
+
+            new_vel = tf2_geometry_msgs.do_transform_point(orig_vel, transform)
+            obj_msg.velocity = [new_vel.point.x, new_vel.point.y, new_vel.point.z]
+
+            # Transform keypoints
+            skeleton = obj_msg.skeleton_3d
+            for keypoint in skeleton.keypoints:
+                orig_kp = PointStamped()
+                orig_kp.point.x = keypoint.kp[0]
+                orig_kp.point.y = keypoint.kp[1]
+                orig_kp.point.z = keypoint.kp[2]
+                conf = keypoint.kp[3]
+
+                new_point = tf2_geometry_msgs.do_transform_point(orig_kp, transform)
+                keypoint.kp = [new_point.point.x, new_point.point.y, new_point.point.z, conf]
+
+        # Update the frame_id
+        ros_msg.header.frame_id = "chairry_base_link"  
+
+    # Handle errors
+    except tf2_ros.LookupException or tf2_ros.ConnectivityException or tf2_ros.ExtrapolationException as e:
+        print("Failed to transform object to chairry_base_link frame due to Exception: ", e)
+
+    return ros_msg
 
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
 # TODO:
@@ -386,7 +386,8 @@ def main():
             # Publish skeletons in ROS as a custom ObjectsStamped message
             ros_msg = objects_wrapper(objects, labels)
             pub_z.publish(ros_msg)
-            pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
+            if zed_location == 'chairry':
+                pub_c.publish(local_to_map_transform(ros_msg, tfBuffer, "chairry_base_link"))
             
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg)
