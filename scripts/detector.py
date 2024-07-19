@@ -19,6 +19,8 @@ import zed_yolo_ros.msg as zed_msgs
 from sensor_msgs.msg import PointCloud2, PointField
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point, Quaternion
 
 
 
@@ -29,6 +31,7 @@ conf_thres = 0.4
 model_name = 'yolov8m-pose'
 zed_location = 'detached'
 skeletons = None
+window_size = 8
 
 CAMERA_NAME = "zed2i"
 
@@ -42,7 +45,7 @@ def ingest_skeletons(skeletons, labels, point_cloud):
     # Check to see if there are any skeletons
     if skeletons is None:
         people = None
-        labels = None
+        labels = []
         return people, labels
     
     # Create a list of people, each with 17 4-d keypoints
@@ -67,9 +70,10 @@ def ingest_skeletons(skeletons, labels, point_cloud):
             # Find the corresponding 3D point in the point cloud
             err,point_3d = point_cloud.get_value(x, y)
             
-            # Save the 3D point and confidence score
-            people[i, j] = [point_3d[0], point_3d[1], point_3d[2], conf]
+            # Save the 3D point and confidence score, converting to meters
+            people[i, j] = [point_3d[0]/1000.0, point_3d[1]/1000.0, point_3d[2]/1000.0, conf]
     
+    print("LABELS: ", labels)
     # Return the people and their IDs/labels
     return people, labels
 
@@ -82,7 +86,6 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../models/'
     model_path = models_path+model_name+'.pt'
-    model_labels_path = models_path+model_name+'_labels.txt'
 
     # Download model if not found
     if not os.path.isfile(model_path):
@@ -128,89 +131,211 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
 
 # Wrap skeleton data into ROS ObjectStamped message
 # TODO:
-# - find current position
-# - find current velocity
-# - find tracking state
-# - update tracking state
-def objects_wrapper(objects, labels, pose_history):
-    global zed_location, kp_conf_thresh
+# - check frame id is ok on chairry
+# - add a check for outliers?
+def objects_wrapper(objects, labels, pose_history, vel_history):
+    global zed_location, kp_conf_thresh, window_size
     
+    # Create a ROS message
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
+    ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
+    obj_list = []   # List for storing each person's object message
 
-    if zed_location == 'detached':
-        ros_msg.header.frame_id = CAMERA_NAME
-    elif zed_location == 'chairry':
-        ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
-
-    # Clean pose history of any ids that are no longer present
-    for i in range(len(pose_history)):
-        id = pose_history[i][0]
-        if id not in labels:
-            # Remove the id's entry from the pose history
-            pose_history.pop(i)
-
-    obj_list = []
+    # Prepare the histories, removing old data
+    pose_history, vel_history = prep_histories(labels, pose_history, vel_history) 
+    
+    # If there are no detections, return an empty list
     if objects is None:
-        ros_msg.objects = []
+        ros_msg.objects = obj_list
+        
+    # Otherwise, create an object message for each person
     else:
         for i in range(objects.shape[0]):
             person = objects[i]
             obj_msg = zed_msgs.Object()
             obj_msg.label_id = labels[i]
 
-            
+            # Initialisations
             position = [0,0,0]
+            num_kps = 0
+            
+            # Iterate through the person's keypoints
             for j in range(person.shape[0]):
                 keypoint = person[j]
+                
+                # Store the 3d keypoint data (for RViz visualisation)
                 x = keypoint[0]
                 y = keypoint[1]
                 z = keypoint[2]
                 conf = keypoint[3]
                 obj_msg.skeleton_3d.keypoints[j].kp = [x, y, z, conf]
-                # print(obj_msg.skeleton_3d.keypoints[j].kp)
 
-                # Sum the average position
-                # Only add the keypoint if:
-                # - the confidence is above the confidence threshold
-                # - the keypoint is finite (not inf, -inf, nor NaN)
-                # - the keypoint is not at the origin (sign of an error)
-                num_kps = 0
-                if conf > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
+                # Find the person's position by first summing the VALID keypoints
+                #  '--> Keypoints are valid if:
+                #       - the confidence is above the confidence threshold
+                #       - the keypoint is finite (not inf, -inf, nor NaN)
+                #       - the keypoint is not at the origin (sign of an error)
+                #       - it's one of the first 6 keypoints (shoulders & up - more stable)
+                # TODO: add a check for outliers?
+                if conf > kp_conf_thresh and math.isfinite(keypoint[0]) and keypoint[0] != 0 and j <= 6:
                     position[0] += x
                     position[1] += y
                     position[2] += z
-                    num_kps +=1
+                    num_kps += 1 
 
-            # Calculate the average position
-            obj_msg.position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
+            # Calculate the position of the person: average of valid keypoints
+            if num_kps > 0:
+                obj_msg.position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
+            else:
+                # No valid keypoints: set the position to the origin (unlikely)
+                obj_msg.position = [0, 0, 0]
 
-            # Get index of the person in the pose history
-            # pose_history = [[id, [x, y, z]], [id, [x, y, z]], ...]
+            # Get indices of the person in the pose and velocity histories
             id = labels[i]
-            if id in pose_history:
-                index = pose_history.index(id)
-                old_pose = pose_history[index][1]
-                new_pose = obj_msg.position
-                # Calculate velocity
-                obj_msg.velocity = [new_pose[0] - old_pose[0], new_pose[1] - old_pose[1], new_pose[2] - old_pose[2]]
-
-                # Save new pose in pose history at same index (replace old pose)
-                pose_history[index] = [id, new_pose]
-
-            obj_list.append(obj_msg)
+            pose_index, vel_index = get_indices(id, pose_history, vel_history)
             
+            
+            # If the person has a valid current position & has been detected before
+            # Then update the pose and velocity histories accordingly
+            if num_kps > 0 and pose_index != -1:
+                # Update the pose and velocity histories & find average velocity
+                pose_history, vel_history, averaged_velocity = update_pose_vel(pose_history, vel_history, obj_msg, pose_index, vel_index, id)
+
+                # Set the velocity of the person
+                obj_msg.velocity = averaged_velocity
+                
+            # If the person has a valid current position and has no pose history
+            # Then add the person to the pose history
+            if num_kps > 0 and pose_index == -1:
+                # Add new pose to pose history
+                position = obj_msg.position
+                pose_history.append([id, [position[0], position[1], position[2], rospy.Time.now().to_sec()]])
+                
+            # If the person has a valid current position and has no vel history
+            # Then add the person to the vel history
+            if num_kps > 0 and vel_index == -1:
+                # Add new velocity to velocity history
+                vel_history.append([id, [[0,0,0]]])
+                
+            # If the person has no valid position, set the velocity to zero & don't change histories
+            if num_kps == 0:
+                obj_msg.velocity = [0, 0, 0]
+
+            # Append the object message to the list
+            obj_list.append(obj_msg)
+    
+    # Update the object list in the ROS message    
     ros_msg.objects = obj_list
-    return ros_msg, pose_history  
+    
+    # Optional: print pose and velocity histories for debugging
+    print("Pose history after saving: ", pose_history)
+    print("Vel history after saving: ", vel_history)
+    
+    # Return the ROS message and the updated pose and velocity histories
+    return ros_msg, pose_history, vel_history
+
+# Prepare the histories, removing old data
+def prep_histories(labels, pose_history, vel_history):
+    global window_size
+    
+    # Format of pose_history and vel_history (assuming window_size = 3):
+    # pose_history = [[id, [x, y, z, t]], [id, [x, y, z, t]], ...]
+    # vel_history = [[id, [[x, y, z], [x, y, z], [x, y, z]]], [id, [[x, y, z], [x, y, z], [x, y, z]]], ...]
+    
+    # Clean pose history of any ids that are no longer present
+    clean_history = []
+    for i in range(len(pose_history)):
+        id = pose_history[i][0]
+        if id in labels:
+            clean_history.append(pose_history[i])
+    pose_history = clean_history 
+    
+    # Clean velocity history of any ids that are no longer present (for all of window size)
+    i = 0
+    while i < len(vel_history):
+        remove = False
+        if len(vel_history[i][1]) == window_size:
+            remove = all(vel == [0, 0, 0] for vel in vel_history[i][1])
+        if remove:
+            vel_history.pop(i)
+        else:
+            i += 1
+    
+    # Add zero velocities to velocity history for ids that are no longer present
+    for entry in vel_history:
+        id = entry[0]
+        if id not in labels:
+            entry[1].append([0, 0, 0])
+            if len(entry[1]) > window_size:
+                entry[1].pop(0)
+    
+    return pose_history, vel_history
+
+# Find the index of the person in the pose and velocity histories
+def get_indices(id, pose_history, vel_history):
+    pose_index = -1
+    vel_index = -1
+    for i in range(len(pose_history)):
+        if id == pose_history[i][0]:
+            pose_index = i
+            break
+    for i in range(len(vel_history)):
+        if id == vel_history[i][0]:
+            vel_index = i
+            break
+    return pose_index, vel_index
+
+# Update the pose and velocity histories & find average velocity
+def update_pose_vel(pose_history, vel_history, obj_msg, pose_index, vel_index, id):
+    # - replace the old position with the new position in pose history
+    # - calculate the current velocity of the person
+    # - save the current velocity in the velocity history
+    # - average the velocity over the n most recent frames (n = window_size)
+    
+    # Format of pose_history and vel_history (assuming window_size = 3):
+    # pose_history = [[id, [x, y, z, t]], [id, [x, y, z, t]], ...]
+    # vel_history = [[id, [[x, y, z], [x, y, z], [x, y, z]]], [id, [[x, y, z], [x, y, z], [x, y, z]]], ...]
+
+    # Prepare variables for velocity calculation & pose history update
+    # Save the time in seconds for velocity calculation
+    old_pose = pose_history[pose_index][1]
+    position = obj_msg.position
+    new_pose = [position[0], position[1], position[2], rospy.Time.now().to_sec()]
+    delta_time = new_pose[3] - old_pose[3]
+    
+    # Replace the old pose with the new pose in the pose history
+    pose_history[pose_index] = [id, new_pose]
+    
+    # Calculate velocity
+    current_velocity = [(new_pose[0] - old_pose[0])/delta_time, (new_pose[1] - old_pose[1])/delta_time, (new_pose[2] - old_pose[2])/delta_time]
+    vel_history[vel_index][1].append(current_velocity)
+    if len(vel_history[vel_index][1]) > window_size:
+        vel_history[vel_index][1].pop(0)
+
+    # Find the average the velocity over the n most recent frames (n = window_size)
+    recent_velocities = vel_history[vel_index][1]
+    averaged_velocity = [0, 0, 0]
+    for i in range(len(recent_velocities)):
+        averaged_velocity[0] += recent_velocities[i][0]
+        averaged_velocity[1] += recent_velocities[i][1]
+        averaged_velocity[2] += recent_velocities[i][2]
+    averaged_velocity[0] = averaged_velocity[0]/len(recent_velocities)
+    averaged_velocity[1] = averaged_velocity[1]/len(recent_velocities)
+    averaged_velocity[2] = averaged_velocity[2]/len(recent_velocities)
+    
+    return pose_history, vel_history, averaged_velocity
 
 # Wrap skeleton data into ROS PointCloud2 message for RViz Visualisation
-def point_cloud_wrapper(ros_msg):
+# TODO:
+# - fix frame issue
+def point_cloud_wrapper(ros_msg, frame):
     global kp_conf_thresh
 
     # Create a header
     header = std_msgs.msg.Header()
     header.stamp = rospy.Time.now()
-    header.frame_id = CAMERA_NAME + "_left_camera_frame"
+    header.frame_id = frame
     
     # Define the fields
     fields = [
@@ -246,15 +371,78 @@ def point_cloud_wrapper(ros_msg):
             # - the keypoint is not at the origin (sign of an error)
             if confidence > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
                 # Convert point coordinates from millimeters to meters
-                point = [keypoint.kp[0]/1000.0, keypoint.kp[1]/1000.0, keypoint.kp[2]/1000.0, blue]
+                point = [keypoint.kp[0], keypoint.kp[1], keypoint.kp[2], blue]
                 points.append(point)
 
         # Display the position of the skeleton
         pose = obj_msg.position
-        point = [pose[0], pose[1], pose[2], black]
+        if pose[0] != 0:
+            point = [pose[0], pose[1], pose[2], black]
+            points.append(point)
     
     point_cloud_msg = pc2.create_cloud(header, fields, points)
     return point_cloud_msg
+
+# Populate a ROS MarkerArray message for each person's velocity using marker_wrapper()
+def marker_array_wrapper(ros_msg, frame):
+    marker_array = MarkerArray()
+    for obj_msg in ros_msg.objects:
+        marker = marker_wrapper(obj_msg, [0,0,1,1], frame)
+        marker_array.markers.append(marker)
+        print("Added marker to array")
+        
+    return marker_array
+    
+# Wrap velocity data for each person into a ROS Marker message
+def marker_wrapper(object_msg, color, frame):
+    marker = Marker()
+    marker.header.frame_id = frame
+    marker.header.stamp = rospy.Time.now()
+    marker.ns = "zed"
+    marker.id = object_msg.label_id
+    marker.type = Marker.ARROW
+    marker.action = Marker.ADD
+
+    # Set the scale of the arrow
+    marker.scale.x = 0.1  # shaft diameter
+    marker.scale.y = 0.1  # head diameter
+    marker.scale.z = 0.1  # head length
+
+    # Set the color (red, green, blue, alpha)
+    marker.color.r = color[0]
+    marker.color.g = color[1]
+    marker.color.b = color[2]
+    marker.color.a = color[3]
+
+    # Set the start and end points of the arrow
+    
+    # Get velocity and pose of object
+    vel = object_msg.velocity
+    pos = object_msg.position
+        
+    end = [pos[0] + vel[0], pos[1] + vel[1], pos[2] + vel[2]]
+    
+    start_point = Point()
+    start_point.x = pos[0]
+    start_point.y = pos[1]
+    start_point.z = pos[2]
+
+    end_point = Point()
+    end_point.x = end[0]
+    end_point.y = end[1]
+    end_point.z = end[2] 
+
+    marker.points.append(start_point)
+    marker.points.append(end_point)
+    
+    # Set the orientation of the arrow
+    marker.pose.orientation = Quaternion()
+    marker.pose.orientation.x = 0.0
+    marker.pose.orientation.y = 0.0
+    marker.pose.orientation.z = 0.0
+    marker.pose.orientation.w = 1.0
+
+    return marker
     
 # Transform skeleton data from local to map frame
 def local_to_map_transform(ros_msg):
@@ -264,7 +452,7 @@ def local_to_map_transform(ros_msg):
         transform = TransformStamped()
         transform.header.stamp = rospy.Time.now()
         transform.header.frame_id = "chairry_base_link"
-        transform.child_frame_id = "zed2i_left_camera_frame"
+        transform.child_frame_id = CAMERA_NAME + "_left_camera_frame"
         transform.transform.translation.x = -0.25
         transform.transform.translation.y = 0.25
         transform.transform.translation.z = 1.53
@@ -324,9 +512,12 @@ def main():
     # Publish the objects in the zed2i & chairry_base_link frames
     pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
-    # Publish the point cloud in the zed2i_left_camera_frame frame
+    # Publish the point clouds in the zed2i & chairry_base_link frames
     pub_pc_z = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/z', PointCloud2, queue_size=10)
     pub_pc_c = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud/c', PointCloud2, queue_size=10)
+    # Publish the velocity markers in the zed2i_left_camera_frame frame
+    pub_marker_z = rospy.Publisher(CAMERA_NAME+'/skeletons/velocity_markers/z', MarkerArray, queue_size=10)
+    pub_marker_c = rospy.Publisher(CAMERA_NAME+'/skeletons/velocity_markers/c', MarkerArray, queue_size=10)
 
     ###################
     ##### Threads #####
@@ -371,6 +562,7 @@ def main():
     image_left_temp = sl.Mat()
     point_cloud = sl.Mat()
     pose_history = []
+    vel_history = []
 
     while rospy.is_shutdown() is False:
         # Grab data from the camera
@@ -413,11 +605,14 @@ def main():
             ##### Publish Data #####
             ########################
             # Publish skeletons in ROS as a custom ObjectsStamped message
-            ros_msg, pose_history = objects_wrapper(objects, labels, pose_history)
+            ros_msg, pose_history, vel_history = objects_wrapper(objects, labels, pose_history, vel_history)
             pub_z.publish(ros_msg)
             # Publish a point cloud with all keypoints for visualisation
-            pc_msg = point_cloud_wrapper(ros_msg)
+            pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
             pub_pc_z.publish(pc_msg)
+            # Publish a marker for the velocity of the skeletons
+            markers_msg = marker_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
+            pub_marker_z.publish(markers_msg)
 
             # Transform the skeletons to the chairry_base_link frame
             if zed_location == 'chairry':
@@ -426,9 +621,13 @@ def main():
                 pub_c.publish(transform_msg)
 
                 # Publish a point cloud with all keypoints for visualisation
-                pc_msg = point_cloud_wrapper(transform_msg)
+                pc_msg = point_cloud_wrapper(transform_msg, "chairry_base_link")
                 pub_pc_c.publish(pc_msg)
-            
+                
+                # Publish a marker for the velocity of the skeletons
+                markers_msg = marker_array_wrapper(ros_msg, "chairry_base_link")
+                pub_marker_c.publish(markers_msg)
+                
             
     
     # Close the camera when the node is shutdown
@@ -444,7 +643,7 @@ if __name__ == '__main__':
     namespace = rospy.get_name() + "/"
     model_name = rospy.get_param(namespace + 'model_name', 'yolov8m-pose')
     img_size = rospy.get_param(namespace + 'img_size', 416)
-    conf_thres = rospy.get_param(namespace + 'conf_thres', 0.4)
+    conf_thres = rospy.get_param(namespace + 'conf_thres', 0.8)
     zed_location = rospy.get_param(namespace + 'zed_location', 'detached')
     rospy.loginfo(f"Model Name: {model_name}")
     rospy.loginfo(f"Image Size: {img_size}")
