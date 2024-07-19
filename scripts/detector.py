@@ -473,14 +473,14 @@ def local_to_map_transform(ros_msg):
             new_pose = tf2_geometry_msgs.do_transform_point(orig_pose, transform)
             obj_msg.position = [new_pose.point.x, new_pose.point.y, new_pose.point.z]
 
-            # Transform velocity
-            orig_vel = PointStamped()
-            orig_vel.point.x = obj_msg.velocity[0]
-            orig_vel.point.y = obj_msg.velocity[1]
-            orig_vel.point.z = obj_msg.velocity[2]
+            # # Transform velocity
+            # orig_vel = PointStamped()
+            # orig_vel.point.x = obj_msg.velocity[0]
+            # orig_vel.point.y = obj_msg.velocity[1]
+            # orig_vel.point.z = obj_msg.velocity[2]
 
-            new_vel = tf2_geometry_msgs.do_transform_point(orig_vel, transform)
-            obj_msg.velocity = [new_vel.point.x, new_vel.point.y, new_vel.point.z]
+            # new_vel = tf2_geometry_msgs.do_transform_point(orig_vel, transform)
+            # obj_msg.velocity = [new_vel.point.x, new_vel.point.y, new_vel.point.z]
 
             # Transform keypoints
             skeleton = obj_msg.skeleton_3d
@@ -626,7 +626,7 @@ def main():
                 pub_pc_c.publish(pc_msg)
                 
                 # Publish a marker for the velocity of the skeletons
-                markers_msg = marker_array_wrapper(ros_msg, "chairry_base_link")
+                markers_msg = marker_array_wrapper(transform_msg, "chairry_base_link")
                 pub_marker_c.publish(markers_msg)
                 
             
