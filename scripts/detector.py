@@ -386,6 +386,7 @@ def point_cloud_wrapper(ros_msg, frame):
 # Populate a ROS MarkerArray message for each person's velocity using marker_wrapper()
 def marker_array_wrapper(ros_msg, frame):
     marker_array = MarkerArray()
+    marker_array.markers = []
     for obj_msg in ros_msg.objects:
         marker = marker_wrapper(obj_msg, [0,0,1,1], frame)
         marker_array.markers.append(marker)
