@@ -455,7 +455,7 @@ def local_to_map_transform(ros_msg):
         transform.header.frame_id = "chairry_base_link"
         transform.child_frame_id = CAMERA_NAME + "_left_camera_frame"
         transform.transform.translation.x = -0.25
-        transform.transform.translation.y = 0.25
+        transform.transform.translation.y = 0
         transform.transform.translation.z = 1.53
         quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
         transform.transform.rotation.x = quat[0]
@@ -473,15 +473,8 @@ def local_to_map_transform(ros_msg):
             new_pose = tf2_geometry_msgs.do_transform_point(orig_pose, transform)
             obj_msg.position = [new_pose.point.x, new_pose.point.y, new_pose.point.z]
 
-            # # Transform velocity
-            # orig_vel = PointStamped()
-            # orig_vel.point.x = obj_msg.velocity[0]
-            # orig_vel.point.y = obj_msg.velocity[1]
-            # orig_vel.point.z = obj_msg.velocity[2]
-
-            # new_vel = tf2_geometry_msgs.do_transform_point(orig_vel, transform)
-            # obj_msg.velocity = [new_vel.point.x, new_vel.point.y, new_vel.point.z]
-
+            # Velocity is relative to the position, so no need to transform it
+            
             # Transform keypoints
             skeleton = obj_msg.skeleton_3d
             for keypoint in skeleton.keypoints:
