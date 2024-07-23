@@ -72,8 +72,7 @@ def ingest_skeletons(skeletons, labels, point_cloud):
             
             # Save the 3D point and confidence score, converting to meters
             people[i, j] = [point_3d[0]/1000.0, point_3d[1]/1000.0, point_3d[2]/1000.0, conf]
-    
-    print("LABELS: ", labels)
+
     # Return the people and their IDs/labels
     return people, labels
 
@@ -143,7 +142,7 @@ def objects_wrapper(objects, labels, pose_history, vel_history):
     obj_list = []   # List for storing each person's object message
 
     # Prepare the histories, removing old data
-    pose_history, vel_history = prep_histories(labels, pose_history, vel_history) 
+    pose_history, vel_history, removed_ids = prep_histories(labels, pose_history, vel_history) 
     
     # If there are no detections, return an empty list
     if objects is None:
@@ -228,12 +227,8 @@ def objects_wrapper(objects, labels, pose_history, vel_history):
     # Update the object list in the ROS message    
     ros_msg.objects = obj_list
     
-    # Optional: print pose and velocity histories for debugging
-    print("Pose history after saving: ", pose_history)
-    print("Vel history after saving: ", vel_history)
-    
     # Return the ROS message and the updated pose and velocity histories
-    return ros_msg, pose_history, vel_history
+    return ros_msg, pose_history, vel_history, removed_ids
 
 # Prepare the histories, removing old data
 def prep_histories(labels, pose_history, vel_history):
@@ -245,11 +240,14 @@ def prep_histories(labels, pose_history, vel_history):
     
     # Clean pose history of any ids that are no longer present
     clean_history = []
+    removed_labels = []
     for i in range(len(pose_history)):
         id = pose_history[i][0]
         if id in labels:
             clean_history.append(pose_history[i])
-    pose_history = clean_history 
+        else:
+            removed_labels.append(id)
+    pose_history = clean_history
     
     # Clean velocity history of any ids that are no longer present (for all of window size)
     i = 0
@@ -270,7 +268,7 @@ def prep_histories(labels, pose_history, vel_history):
             if len(entry[1]) > window_size:
                 entry[1].pop(0)
     
-    return pose_history, vel_history
+    return pose_history, vel_history, removed_labels
 
 # Find the index of the person in the pose and velocity histories
 def get_indices(id, pose_history, vel_history):
@@ -384,25 +382,27 @@ def point_cloud_wrapper(ros_msg, frame):
     return point_cloud_msg
 
 # Populate a ROS MarkerArray message for each person's velocity using marker_wrapper()
-def marker_array_wrapper(ros_msg, frame):
+def marker_array_wrapper(ros_msg, frame, removed_ids):
     marker_array = MarkerArray()
     marker_array.markers = []
     for obj_msg in ros_msg.objects:
-        marker = marker_wrapper(obj_msg, [0,0,1,1], frame)
-        marker_array.markers.append(marker)
-        print("Added marker to array")
+        if obj_msg.label_id in removed_ids:
+            marker = marker_wrapper(obj_msg, [1,0,0,1], frame, Marker.DELETE)
+        else:
+            marker = marker_wrapper(obj_msg, [0,0,1,1], frame, Marker.ADD)
+            marker_array.markers.append(marker)
         
     return marker_array
     
 # Wrap velocity data for each person into a ROS Marker message
-def marker_wrapper(object_msg, color, frame):
+def marker_wrapper(object_msg, color, frame, action):
     marker = Marker()
     marker.header.frame_id = frame
     marker.header.stamp = rospy.Time.now()
     marker.ns = "zed"
     marker.id = object_msg.label_id
     marker.type = Marker.ARROW
-    marker.action = Marker.ADD
+    marker.action = action
 
     # Set the scale of the arrow
     marker.scale.x = 0.1  # shaft diameter
@@ -599,13 +599,13 @@ def main():
             ##### Publish Data #####
             ########################
             # Publish skeletons in ROS as a custom ObjectsStamped message
-            ros_msg, pose_history, vel_history = objects_wrapper(objects, labels, pose_history, vel_history)
+            ros_msg, pose_history, vel_history, removed_ids = objects_wrapper(objects, labels, pose_history, vel_history)
             pub_z.publish(ros_msg)
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
             pub_pc_z.publish(pc_msg)
             # Publish a marker for the velocity of the skeletons
-            markers_msg = marker_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
+            markers_msg = marker_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
             pub_marker_z.publish(markers_msg)
 
             # Transform the skeletons to the chairry_base_link frame
@@ -619,7 +619,7 @@ def main():
                 pub_pc_c.publish(pc_msg)
                 
                 # Publish a marker for the velocity of the skeletons
-                markers_msg = marker_array_wrapper(transform_msg, "chairry_base_link")
+                markers_msg = marker_array_wrapper(transform_msg, "chairry_base_link", removed_ids)
                 pub_marker_c.publish(markers_msg)
                 
             
