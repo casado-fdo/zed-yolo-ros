@@ -7,6 +7,7 @@ import torch
 import cv2
 import pyzed.sl as sl
 from ultralytics import YOLO
+import ultralytics
 from threading import Lock, Thread
 from time import sleep
 import shutil
@@ -94,13 +95,13 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         model = YOLO(model_name+'.pt')  
 
         # Copy the models into the correct directory
-        shutil.copy(model_name+'.pt', models_path+model_name+'.pt')
+        shutil.copy(model_name+'.pt', model_path)
     
     print("Model initialized")
 
     # Load the model
     print("Model loading...") 
-    model = YOLO(models_path+model_name+'.pt')
+    model = YOLO(model_path)
     print("Model loaded")
     
     while rospy.is_shutdown() is False:
