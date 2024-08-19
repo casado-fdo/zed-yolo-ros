@@ -22,6 +22,7 @@ import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion
+from people_msgs.msg import People, Person
 
 
 
@@ -230,6 +231,24 @@ def objects_wrapper(objects, labels, pose_history, vel_history):
     
     # Return the ROS message and the updated pose and velocity histories
     return ros_msg, pose_history, vel_history, removed_ids
+
+# TODO: fix frames. This is in cbl, and we want it in odom when on chairry (not when detached)
+def people_wrapper(ros_msg):
+    people_msg = People()
+    people_msg.header = ros_msg.header
+    people_msg.people = []
+    for obj_msg in ros_msg.objects:
+        person = Person()
+        person.name = str(obj_msg.label_id)
+        person.position.x = obj_msg.position[0]
+        person.position.y = obj_msg.position[1]
+        person.position.z = obj_msg.position[2]
+        person.velocity.x = obj_msg.velocity[0]
+        person.velocity.y = obj_msg.velocity[1]
+        person.velocity.z = obj_msg.velocity[2]
+        people_msg.people.append(person)
+    return people_msg
+
 
 # Prepare the histories, removing old data
 def prep_histories(labels, pose_history, vel_history):
@@ -504,6 +523,8 @@ def main():
     ######################
     ##### Publishers #####
     ######################
+    # Publish the people
+    pub_people = rospy.Publisher(CAMERA_NAME+'/skeletons/people', People, queue_size=50)
     # Publish the objects in the zed2i & chairry_base_link frames
     pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
@@ -602,6 +623,9 @@ def main():
             # Publish skeletons in ROS as a custom ObjectsStamped message
             ros_msg, pose_history, vel_history, removed_ids = objects_wrapper(objects, labels, pose_history, vel_history)
             pub_z.publish(ros_msg)
+            # Publish the people for move_base
+            people_msg = people_wrapper(ros_msg)
+            pub_people.publish(people_msg)
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
             pub_pc_z.publish(pc_msg)
