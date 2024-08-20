@@ -22,7 +22,6 @@ import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion
-from people_msgs.msg import People, Person
 
 
 
@@ -234,11 +233,11 @@ def objects_wrapper(objects, labels, pose_history, vel_history):
 
 # TODO: fix frames. This is in cbl, and we want it in odom when on chairry (not when detached)
 def people_wrapper(ros_msg):
-    people_msg = People()
+    people_msg = zed_msgs.People()
     people_msg.header = ros_msg.header
     people_msg.people = []
     for obj_msg in ros_msg.objects:
-        person = Person()
+        person = zed_msgs.Person()
         person.name = str(obj_msg.label_id)
         person.position.x = obj_msg.position[0]
         person.position.y = obj_msg.position[1]
@@ -524,7 +523,7 @@ def main():
     ##### Publishers #####
     ######################
     # Publish the people
-    pub_people = rospy.Publisher(CAMERA_NAME+'/skeletons/people', People, queue_size=50)
+    pub_people = rospy.Publisher(CAMERA_NAME+'/skeletons/people', zed_msgs.People, queue_size=50)
     # Publish the objects in the zed2i & chairry_base_link frames
     pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
