@@ -523,7 +523,7 @@ def main():
     ##### Publishers #####
     ######################
     # Publish the people
-    pub_people = rospy.Publisher(CAMERA_NAME+'/skeletons/people', People, queue_size=50)
+    pub_people = rospy.Publisher('/people', People, queue_size=50)
     # Publish the objects in the zed2i & chairry_base_link frames
     pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
