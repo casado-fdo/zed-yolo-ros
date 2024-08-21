@@ -32,7 +32,7 @@ conf_thres = 0.4
 model_name = 'yolov8m-pose'
 zed_location = 'detached'
 skeletons = None
-window_size = 8
+window_size = 4
 
 CAMERA_NAME = "zed2i"
 
@@ -232,21 +232,72 @@ def objects_wrapper(objects, labels, pose_history, vel_history):
     return ros_msg, pose_history, vel_history, removed_ids
 
 # TODO: fix frames. This is in cbl, and we want it in odom when on chairry (not when detached)
-def people_wrapper(ros_msg):
+def people_wrapper(ros_msg, tf_buffer):
     people_msg = People()
-    people_msg.header = ros_msg.header
+    # create header step by step
+    people_msg.header.stamp = ros_msg.header.stamp
+    people_msg.header.seq = ros_msg.header.seq
+    people_msg.header.frame_id = "odom"  # Set the new frame_id to "odom"
+
     people_msg.people = []
+
     for obj_msg in ros_msg.objects:
         person = Person()
         person.name = str(obj_msg.label_id)
-        person.position.x = obj_msg.position[0]
-        person.position.y = obj_msg.position[1]
-        person.position.z = obj_msg.position[2]
-        person.velocity.x = obj_msg.velocity[0]
-        person.velocity.y = obj_msg.velocity[1]
-        person.velocity.z = obj_msg.velocity[2]
+
+        # Create a PointStamped for the position
+        position_stamped = tf2_geometry_msgs.PointStamped()
+        position_stamped.header = ros_msg.header
+        position_stamped.point.x = obj_msg.position[0]
+        position_stamped.point.y = obj_msg.position[1]
+        position_stamped.point.z = obj_msg.position[2]
+
+        # Create a PointStamped for the velocity
+        velocity_stamped = tf2_geometry_msgs.PointStamped()
+        velocity_stamped.header = ros_msg.header
+        velocity_stamped.point.x = obj_msg.velocity[0] + obj_msg.position[0]
+        velocity_stamped.point.y = obj_msg.velocity[1] + obj_msg.position[1]
+        velocity_stamped.point.z = obj_msg.velocity[2] + obj_msg.position[2]
+
+        # Print original position and velocity
+        print("original pos: ", [obj_msg.position[0], obj_msg.position[1], obj_msg.position[2]])
+        print("original vel: ", [obj_msg.velocity[0], obj_msg.velocity[1], obj_msg.velocity[2]])
+
+        try:
+            # Retrieve the transform once
+            transform = tf_buffer.lookup_transform("odom", ros_msg.header.frame_id, ros_msg.header.stamp, rospy.Duration(1.0))
+
+            # Apply the transform to the position
+            transformed_position = tf2_geometry_msgs.do_transform_point(position_stamped, transform)
+            person.position.x = transformed_position.point.x
+            person.position.y = transformed_position.point.y
+            person.position.z = transformed_position.point.z
+
+            # Print transformed position
+            print("transformed pos: ", [person.position.x, person.position.y, person.position.z])
+
+            # Apply the transform to the velocity
+            transformed_velocity = tf2_geometry_msgs.do_transform_point(velocity_stamped, transform)
+            person.velocity.x = transformed_velocity.point.x - person.position.x
+            person.velocity.y = transformed_velocity.point.y - person.position.y
+            person.velocity.z = transformed_velocity.point.z - person.position.z
+
+            # Print transformed velocity
+            print("transformed vel: ", [person.velocity.x, person.velocity.y, person.velocity.z])
+
+        except tf2_ros.LookupException as e:
+            rospy.logwarn(f"Transform lookup failed: {e}")
+            continue
+        except tf2_ros.ExtrapolationException as e:
+            rospy.logwarn(f"Transform extrapolation failed: {e}")
+            continue
+
         people_msg.people.append(person)
+
     return people_msg
+
+
+
 
 
 # Prepare the histories, removing old data
@@ -518,6 +569,10 @@ def local_to_map_transform(ros_msg):
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
 def main():
     global image_np, run_signal, img_size, conf_thres, model_name, zed_location, skeletons, ids
+    
+    # Initialize the tf_buffer and TransformListener
+    tf_buffer = tf2_ros.Buffer()
+    tf_listener = tf2_ros.TransformListener(tf_buffer)
 
     ######################
     ##### Publishers #####
@@ -623,7 +678,7 @@ def main():
             ros_msg, pose_history, vel_history, removed_ids = objects_wrapper(objects, labels, pose_history, vel_history)
             pub_z.publish(ros_msg)
             # Publish the people for move_base
-            people_msg = people_wrapper(ros_msg)
+            people_msg = people_wrapper(ros_msg, tf_buffer)
             pub_people.publish(people_msg)
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
