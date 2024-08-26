@@ -22,7 +22,7 @@ import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 from visualization_msgs.msg import Marker, MarkerArray
 from geometry_msgs.msg import Point, Quaternion
-from people_msgs.msg import People, Person
+# from people_msgs.msg import People, Person
 
 
 lock = Lock()
@@ -468,6 +468,7 @@ def velocity_array_wrapper(ros_msg, frame, removed_ids):
 # Populate a ROS MarkerArray message for each person's velocity using velocity_wrapper()
 # TODO: obj_msg.label_id won't be in removed_ids, so this won't work
 def bone_array_wrapper(ros_msg, frame, removed_ids):
+    global kp_conf_thresh
     connections = [ 
         (0,1), (1,3), 
         (0,2), (2,4),
@@ -483,10 +484,11 @@ def bone_array_wrapper(ros_msg, frame, removed_ids):
         person_id = obj_msg.label_id
         skeleton = obj_msg.skeleton_3d
         for connection_idx, (start_idx, end_idx) in enumerate(connections):
-            if skeleton.keypoints[start_idx].kp[3] < kp_conf_thresh or skeleton.keypoints[end_idx].kp[3] < kp_conf_thresh:
-                continue
-            start_point = skeleton.keypoints[start_idx].kp
-            end_point = skeleton.keypoints[end_idx].kp
+            start = skeleton.keypoints[start_idx].kp
+            end = skeleton.keypoints[end_idx].kp
+            if start[3] > kp_conf_thresh and end[3] > kp_conf_thresh and start[0] != 0 and end[0] != 0 and math.isfinite(start[0]) and math.isfinite(end[0]):
+                start_point = start
+                end_point = end
             bone = bone_wrapper(person_id, connection_idx, start_point, end_point, [0,0,1,1], frame, Marker.ADD)
             bone_array.markers.append(bone)
     for person_id in removed_ids:
@@ -644,7 +646,7 @@ def main():
     ##### Publishers #####
     ######################
     # Publish the people
-    pub_people = rospy.Publisher('/people', People, queue_size=50)
+    # pub_people = rospy.Publisher('/people', People, queue_size=50)
     # Publish the bones
     pub_bones = rospy.Publisher(CAMERA_NAME+'/skeletons/bones/z', MarkerArray, queue_size=10)
     # Publish the objects in the zed2i & chairry_base_link frames
@@ -746,8 +748,8 @@ def main():
             ros_msg, pose_history, vel_history, removed_ids = objects_wrapper(objects, labels, pose_history, vel_history)
             pub_z.publish(ros_msg)
             # Publish the people for move_base
-            people_msg = people_wrapper(ros_msg, tf_buffer)
-            pub_people.publish(people_msg)
+            # people_msg = people_wrapper(ros_msg, tf_buffer)
+            # pub_people.publish(people_msg)
             # Publish a point cloud with all keypoints for visualisation
             pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
             pub_pc_z.publish(pc_msg)
@@ -757,6 +759,7 @@ def main():
             
             # Publish the bones
             bone_msg = bone_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
+            pub_bones.publish(bone_msg)
 
             # Transform the skeletons to the chairry_base_link frame
             if zed_location == 'chairry':
