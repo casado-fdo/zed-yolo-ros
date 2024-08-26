@@ -419,11 +419,11 @@ def point_cloud_wrapper(ros_msg, frame):
     b = 255
     blue = (r << 16) | (g << 8) | b
 
-     # Set the color of the position to black (arbitrary choice)
+     # Set the color of the position to white (arbitrary choice)
     r = 255
     g = 255
     b = 255
-    black = (r << 16) | (g << 8) | b
+    white = (r << 16) | (g << 8) | b
 
     # Display all valid keypoints & skeleton's position
     points = []
@@ -445,45 +445,110 @@ def point_cloud_wrapper(ros_msg, frame):
         # Display the position of the skeleton
         pose = obj_msg.position
         if pose[0] != 0:
-            point = [pose[0], pose[1], pose[2], black]
+            point = [pose[0], pose[1], pose[2], white]
             points.append(point)
     
     point_cloud_msg = pc2.create_cloud(header, fields, points)
     return point_cloud_msg
 
-# Populate a ROS MarkerArray message for each person's velocity using marker_wrapper()
-def marker_array_wrapper(ros_msg, frame, removed_ids):
-    marker_array = MarkerArray()
-    marker_array.markers = []
+# Populate a ROS MarkerArray message for each person's velocity using velocity_wrapper()
+# TODO: obj_msg.label_id won't be in removed_ids, so this won't work
+def velocity_array_wrapper(ros_msg, frame, removed_ids):
+    velocity_array = MarkerArray()
+    velocity_array.markers = []
     for obj_msg in ros_msg.objects:
         if obj_msg.label_id in removed_ids:
-            marker = marker_wrapper(obj_msg, [1,0,0,1], frame, Marker.DELETE)
+            vel = velocity_wrapper(obj_msg, [1,0,0,1], frame, Marker.DELETE)
         else:
-            marker = marker_wrapper(obj_msg, [0,0,1,1], frame, Marker.ADD)
-            marker_array.markers.append(marker)
-        
-    return marker_array
-    
-# Wrap velocity data for each person into a ROS Marker message
-def marker_wrapper(object_msg, color, frame, action):
-    marker = Marker()
-    marker.header.frame_id = frame
-    marker.header.stamp = rospy.Time.now()
-    marker.ns = "zed"
-    marker.id = object_msg.label_id
-    marker.type = Marker.ARROW
-    marker.action = action
+            vel = velocity_wrapper(obj_msg, [0,0,1,1], frame, Marker.ADD)
+            
+        velocity_array.markers.append(vel)
+    return velocity_array
 
-    # Set the scale of the arrow
-    marker.scale.x = 0.1  # shaft diameter
-    marker.scale.y = 0.1  # head diameter
-    marker.scale.z = 0.1  # head length
+# Populate a ROS MarkerArray message for each person's velocity using velocity_wrapper()
+# TODO: obj_msg.label_id won't be in removed_ids, so this won't work
+def bone_array_wrapper(ros_msg, frame, removed_ids):
+    connections = [ 
+        (0,1), (1,3), 
+        (0,2), (2,4),
+        (0,5), (5,7), (7,9), 
+        (0,6), (6,8), (8,10), 
+        (5,11), (11,13), (13,15),
+        (6,12), (12,14), (14,16),
+        (5,6), (11,12)
+    ] # 18 connections here
+    bone_array = MarkerArray()
+    bone_array.markers = []
+    for obj_msg in ros_msg.objects:
+        person_id = obj_msg.label_id
+        if obj_msg.label_id in removed_ids:
+            bones = bone_wrapper(obj_msg, [0,1,0,1], frame, Marker.DELETE)
+        else:
+            skeleton = obj_msg.skeleton_3d
+            for connection_idx, (start_idx, end_idx) in enumerate(connections):
+                if skeleton.keypoints[start_idx].kp[3] < kp_conf_thresh or skeleton.keypoints[end_idx].kp[3] < kp_conf_thresh:
+                    continue
+                start_point = skeleton.keypoints[start_idx].kp
+                end_point = skeleton.keypoints[end_idx].kp
+                bone = bone_wrapper(person_id, connection_idx, start_point, end_point, [0,1,0,1], frame, Marker.ADD)
+                bone_array.markers.append(bone)
+    return bone_array
+
+def bone_wrapper(person_id, connection_idx, start_point, end_point, color, frame, action):
+    bone = Marker()
+    bone.header.frame_id = frame
+    bone.header.stamp = rospy.Time.now()
+    bone.ns = "bones_" + str(person_id)
+    bone.id = connection_idx
+    bone.type = Marker.LINE_LIST
+    bone.action = action
+
+    # Set the scale of the bone
+    bone.scale.x = 0.03  # line width
 
     # Set the color (red, green, blue, alpha)
-    marker.color.r = color[0]
-    marker.color.g = color[1]
-    marker.color.b = color[2]
-    marker.color.a = color[3]
+    bone.color.r = color[0]
+    bone.color.g = color[1]
+    bone.color.b = color[2]
+    bone.color.a = color[3]
+
+    # Set the start and end points of the bone
+    start = Point()
+    start.x = start_point[0]
+    start.y = start_point[1]
+    start.z = start_point[2]
+
+    end = Point()
+    end.x = end_point[0]
+    end.y = end_point[1]
+    end.z = end_point[2]
+
+    bone.points.append(start)
+    bone.points.append(end)
+
+    return bone
+
+    
+# Wrap velocity data for each person into a ROS Marker message
+def velocity_wrapper(object_msg, color, frame, action):
+    velocity = Marker()
+    velocity.header.frame_id = frame
+    velocity.header.stamp = rospy.Time.now()
+    velocity.ns = "vel"
+    velocity.id = object_msg.label_id
+    velocity.type = Marker.ARROW
+    velocity.action = action
+
+    # Set the scale of the arrow
+    velocity.scale.x = 0.1  # shaft diameter
+    velocity.scale.y = 0.1  # head diameter
+    velocity.scale.z = 0.1  # head length
+
+    # Set the color (red, green, blue, alpha)
+    velocity.color.r = color[0]
+    velocity.color.g = color[1]
+    velocity.color.b = color[2]
+    velocity.color.a = color[3]
 
     # Set the start and end points of the arrow
     
@@ -503,17 +568,17 @@ def marker_wrapper(object_msg, color, frame, action):
     end_point.y = end[1]
     end_point.z = end[2] 
 
-    marker.points.append(start_point)
-    marker.points.append(end_point)
+    velocity.points.append(start_point)
+    velocity.points.append(end_point)
     
     # Set the orientation of the arrow
-    marker.pose.orientation = Quaternion()
-    marker.pose.orientation.x = 0.0
-    marker.pose.orientation.y = 0.0
-    marker.pose.orientation.z = 0.0
-    marker.pose.orientation.w = 1.0
+    velocity.pose.orientation = Quaternion()
+    velocity.pose.orientation.x = 0.0
+    velocity.pose.orientation.y = 0.0
+    velocity.pose.orientation.z = 0.0
+    velocity.pose.orientation.w = 1.0
 
-    return marker
+    return velocity
     
 # Transform skeleton data from local to map frame
 def local_to_map_transform(ros_msg):
@@ -684,7 +749,7 @@ def main():
             pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
             pub_pc_z.publish(pc_msg)
             # Publish a marker for the velocity of the skeletons
-            markers_msg = marker_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
+            markers_msg = velocity_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
             pub_marker_z.publish(markers_msg)
 
             # Transform the skeletons to the chairry_base_link frame
@@ -698,7 +763,7 @@ def main():
                 pub_pc_c.publish(pc_msg)
                 
                 # Publish a marker for the velocity of the skeletons
-                markers_msg = marker_array_wrapper(transform_msg, "chairry_base_link", removed_ids)
+                markers_msg = velocity_array_wrapper(transform_msg, "chairry_base_link", removed_ids)
                 pub_marker_c.publish(markers_msg)
                 
             
