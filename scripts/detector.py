@@ -644,6 +644,8 @@ def main():
     ######################
     # Publish the people
     pub_people = rospy.Publisher('/people', People, queue_size=50)
+    # Publish the bones
+    pub_bones = rospy.Publisher(CAMERA_NAME+'/skeletons/bones/z', MarkerArray, queue_size=10)
     # Publish the objects in the zed2i & chairry_base_link frames
     pub_z = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/z', zed_msgs.ObjectsStamped, queue_size=50)   # zed2i frame
     pub_c = rospy.Publisher(CAMERA_NAME+'/skeletons/objects/c', zed_msgs.ObjectsStamped, queue_size=50)     # chairry_base_link frame
@@ -751,6 +753,9 @@ def main():
             # Publish a marker for the velocity of the skeletons
             markers_msg = velocity_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
             pub_marker_z.publish(markers_msg)
+            
+            # Publish the bones
+            bone_msg = bone_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
 
             # Transform the skeletons to the chairry_base_link frame
             if zed_location == 'chairry':
