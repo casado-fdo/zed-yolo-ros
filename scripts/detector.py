@@ -481,17 +481,18 @@ def bone_array_wrapper(ros_msg, frame, removed_ids):
     bone_array.markers = []
     for obj_msg in ros_msg.objects:
         person_id = obj_msg.label_id
-        if obj_msg.label_id in removed_ids:
-            bones = bone_wrapper(obj_msg, [0,1,0,1], frame, Marker.DELETE)
-        else:
-            skeleton = obj_msg.skeleton_3d
-            for connection_idx, (start_idx, end_idx) in enumerate(connections):
-                if skeleton.keypoints[start_idx].kp[3] < kp_conf_thresh or skeleton.keypoints[end_idx].kp[3] < kp_conf_thresh:
-                    continue
-                start_point = skeleton.keypoints[start_idx].kp
-                end_point = skeleton.keypoints[end_idx].kp
-                bone = bone_wrapper(person_id, connection_idx, start_point, end_point, [0,1,0,1], frame, Marker.ADD)
-                bone_array.markers.append(bone)
+        skeleton = obj_msg.skeleton_3d
+        for connection_idx, (start_idx, end_idx) in enumerate(connections):
+            if skeleton.keypoints[start_idx].kp[3] < kp_conf_thresh or skeleton.keypoints[end_idx].kp[3] < kp_conf_thresh:
+                continue
+            start_point = skeleton.keypoints[start_idx].kp
+            end_point = skeleton.keypoints[end_idx].kp
+            bone = bone_wrapper(person_id, connection_idx, start_point, end_point, [0,0,1,1], frame, Marker.ADD)
+            bone_array.markers.append(bone)
+    for person_id in removed_ids:
+        for connection_idx, _ in enumerate(connections):
+            bone = bone_wrapper(person_id, connection_idx, [0,0,0], [0,0,0], [1,0,0,1], frame, Marker.DELETE)
+            bone_array.markers.append
     return bone_array
 
 def bone_wrapper(person_id, connection_idx, start_point, end_point, color, frame, action):
