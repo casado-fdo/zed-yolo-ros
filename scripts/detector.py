@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
+'''
+This script performs YOLO pose detection on images from the ZED camera.
+It currently runs at approximately 16 Hz.
+
+'''
+
+
 import rospy
 import math
 import numpy as np
@@ -227,7 +234,7 @@ def objects_wrapper(objects, labels, pos_history, vel_history, frame):
                 #       - the model is pretty confident about it (usually > 0.95)
                 #   - the keypoint is finite (not inf, -inf, nor NaN)
                 #   - the keypoint is not at the origin (sign of an error)
-                if conf > kp_conf_thresh and math.isfinite(keypoint[0]) and keypoint[0] != 0 and j <= 6:
+                if conf > kp_conf_thresh and math.isfinite(keypoint[0]) and keypoint[0] != 0:
                     # Store the 3d keypoint data (for RViz visualisation)
                     obj_msg.skeleton_3d.keypoints[j].kp = [x, y, z, conf]
 
@@ -239,7 +246,6 @@ def objects_wrapper(objects, labels, pos_history, vel_history, frame):
                         position[1] += y
                         position[2] += z
                         num_kps += 1 
-            print("position: ", position)
             # Calculate the position of the person: average of valid keypoints from shoulders up & hips
             if num_kps > 0:
                 position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
