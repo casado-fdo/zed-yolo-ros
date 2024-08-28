@@ -42,12 +42,19 @@ CAMERA_NAME = "zed2i"
 kp_conf_thresh = 0.95
 
 # Convert 2-D Pose keypoints to 3-D points
-def ingest_skeletons(skeletons, labels, point_cloud):
+def ingest_skeletons(skeletons, labels, point_cloud, transform):
+
+    # Define the frame based on the zed location
+    if zed_location == 'chairry':
+        frame = "odom"
+    else:
+        frame = CAMERA_NAME + "_left_camera_frame"
+
     # Check to see if there are any skeletons
     if skeletons is None:
         people = None
         labels = []
-        return people, labels
+        return people, labels, frame
     
     # Create a list of people, each with 17 4-d keypoints
     num_people = skeletons.shape[0]
@@ -83,7 +90,14 @@ def ingest_skeletons(skeletons, labels, point_cloud):
             err,point_3d = point_cloud.get_value(x, y)
             
             # Save the 3D point and confidence score, converting to meters
-            people[i, j] = [point_3d[0]/1000.0, point_3d[1]/1000.0, point_3d[2]/1000.0, conf]
+            point_3d = [point_3d[0]/1000.0, point_3d[1]/1000.0, point_3d[2]/1000.0]
+
+            # If the zed is on chairry, transform the 3D point into the odom frame
+            if zed_location == 'chairry':
+                point_3d = transform_point(point_3d, CAMERA_NAME + "_left_camera_frame", "odom", transform)
+
+            point_3d.append(conf)
+            people[i][j] = point_3d
 
         # Iterate through connections to ensure no "bones" are too long
         for start_idx, end_idx in connections:
@@ -95,8 +109,29 @@ def ingest_skeletons(skeletons, labels, point_cloud):
                 people[i][start_idx][3] = 0
                 people[i][end_idx][3] = 0
 
-    # Return the people and their IDs/labels
-    return people, labels
+    # Return the people and their IDs/labels, as well as the frame
+    return people, labels, frame
+
+def transform_point(point, original_frame, target_frame, transform):
+    # Create a PointStamped for the position
+    point_stamped = tf2_geometry_msgs.PointStamped()
+    point_stamped.header.stamp = rospy.Time.now()
+    point_stamped.header.frame_id = original_frame
+    point_stamped.point.x = point[0]
+    point_stamped.point.y = point[1]
+    point_stamped.point.z = point[2]
+
+    try:
+        # Apply the transform to the point
+        transformed_point = tf2_geometry_msgs.do_transform_point(point_stamped, transform)
+
+        return [transformed_point.point.x, transformed_point.point.y, transformed_point.point.z]
+
+    except tf2_ros.LookupException as e:
+        rospy.logwarn(f"Transform lookup failed: {e}")
+        
+    except tf2_ros.ExtrapolationException as e:
+        rospy.logwarn(f"Transform extrapolation failed: {e}")
 
 # Perform YOLO pose detection
 def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
@@ -151,13 +186,13 @@ def torch_thread(model_name, img_size, conf_thres=0.2, iou_thres=0.45):
         sleep(0.001)
 
 # Wrap skeleton data into ROS ObjectStamped message
-def objects_wrapper(objects, labels, pos_history, vel_history, tf_buffer):
+def objects_wrapper(objects, labels, pos_history, vel_history, frame):
     global zed_location, kp_conf_thresh, window_size
     
     # Create a ROS message
     ros_msg = zed_msgs.ObjectsStamped()
     ros_msg.header.stamp = rospy.Time.now()
-    ros_msg.header.frame_id = CAMERA_NAME + "_left_camera_frame"
+    ros_msg.header.frame_id = frame
     obj_list = []   # List for storing each person's object message
 
     # Prepare the histories, removing old data
@@ -181,6 +216,10 @@ def objects_wrapper(objects, labels, pos_history, vel_history, tf_buffer):
             # Iterate through the person's keypoints
             for j in range(person.shape[0]):
                 keypoint = person[j]
+                x = keypoint[0]
+                y = keypoint[1]
+                z = keypoint[2]
+                conf = keypoint[3]
 
                 # Find VALID keypoints:
                 #   - the confidence is above the confidence threshold
@@ -190,10 +229,6 @@ def objects_wrapper(objects, labels, pos_history, vel_history, tf_buffer):
                 #   - the keypoint is not at the origin (sign of an error)
                 if conf > kp_conf_thresh and math.isfinite(keypoint[0]) and keypoint[0] != 0 and j <= 6:
                     # Store the 3d keypoint data (for RViz visualisation)
-                    x = keypoint[0]
-                    y = keypoint[1]
-                    z = keypoint[2]
-                    conf = keypoint[3]
                     obj_msg.skeleton_3d.keypoints[j].kp = [x, y, z, conf]
 
                     # Calculate the position of the person using  
@@ -204,31 +239,31 @@ def objects_wrapper(objects, labels, pos_history, vel_history, tf_buffer):
                         position[1] += y
                         position[2] += z
                         num_kps += 1 
-
+            print("position: ", position)
             # Calculate the position of the person: average of valid keypoints from shoulders up & hips
             if num_kps > 0:
                 position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
+                obj_msg.position = position
             else:
                 # No valid keypoints: skip this person
                 continue  
 
             # Transform position into odom frame if we're on chairry (currently in zed2i frame)
-            if zed_location == 'chairry':
-                position = transform_point(position, CAMERA_NAME + "_left_camera_frame", "odom", tf_buffer)
-                obj_msg.position = position
-                obj_msg.header.frame_id = "odom"
-            else:
-                obj_msg.position = position
+            # if zed_location == 'chairry':
+            #     position = transform_point(position, CAMERA_NAME + "_left_camera_frame", "odom", tf_buffer)
+            #     obj_msg.position = position
+            # else:
+            #     obj_msg.position = position
 
 
             # Get indices of the person in the position and velocity histories
             id = labels[i]
             pos_index, vel_index = get_indices(id, pos_history, vel_history)
             
-            
+            # print("id: ", id, "pos_index: ", pos_index, "vel_index: ", vel_index)
             # If the person has a valid current position & has been detected before
             # Then update the position and velocity histories accordingly
-            if num_kps > 0 and pos_index != -1:
+            if num_kps > 0 and pos_index != -1 and vel_index != -1:
                 # Update the position and velocity histories & find average velocity
                 pos_history, vel_history, averaged_velocity = update_pos_vel(pos_history, vel_history, obj_msg, pos_index, vel_index, id)
 
@@ -257,71 +292,19 @@ def objects_wrapper(objects, labels, pos_history, vel_history, tf_buffer):
     # Return the ROS message and the updated position and velocity histories
     return ros_msg, pos_history, vel_history, removed_ids
 
-# TODO: fix frames. This is in cbl, and we want it in odom when on chairry (not when detached)
-def people_wrapper(ros_msg, tf_buffer):
+def people_wrapper(ros_msg):
     people_msg = People()
-    # create header step by step
     people_msg.header.stamp = ros_msg.header.stamp
     people_msg.header.seq = ros_msg.header.seq
     people_msg.header.frame_id = ros_msg.header.frame_id
-
     people_msg.people = []
 
     for obj_msg in ros_msg.objects:
         person = Person()
         person.name = str(obj_msg.label_id)
-
-        # # Create a PointStamped for the position
-        # position_stamped = tf2_geometry_msgs.PointStamped()
-        # position_stamped.header = ros_msg.header
-        # position_stamped.point.x = obj_msg.position[0]
-        # position_stamped.point.y = obj_msg.position[1]
-        # position_stamped.point.z = obj_msg.position[2]
-
-        # # Create a PointStamped for the velocity
-        # velocity_stamped = tf2_geometry_msgs.PointStamped()
-        # velocity_stamped.header = ros_msg.header
-        # velocity_stamped.point.x = obj_msg.velocity[0] + obj_msg.position[0]
-        # velocity_stamped.point.y = obj_msg.velocity[1] + obj_msg.position[1]
-        # velocity_stamped.point.z = obj_msg.velocity[2] + obj_msg.position[2]
-
-        # # Print original position and velocity
-        # print("original pos: ", [obj_msg.position[0], obj_msg.position[1], obj_msg.position[2]])
-        # print("original vel: ", [obj_msg.velocity[0], obj_msg.velocity[1], obj_msg.velocity[2]])
-
-        # try:
-        #     # Retrieve the transform once
-        #     transform = tf_buffer.lookup_transform("odom", ros_msg.header.frame_id, ros_msg.header.stamp, rospy.Duration(1.0))
-
-        #     # Apply the transform to the position
-        #     transformed_position = tf2_geometry_msgs.do_transform_point(position_stamped, transform)
-        #     person.position.x = transformed_position.point.x
-        #     person.position.y = transformed_position.point.y
-        #     person.position.z = transformed_position.point.z
-
-        #     # Print transformed position
-        #     print("transformed pos: ", [person.position.x, person.position.y, person.position.z])
-
-        #     # Apply the transform to the velocity
-        #     transformed_velocity = tf2_geometry_msgs.do_transform_point(velocity_stamped, transform)
-        #     person.velocity.x = transformed_velocity.point.x - person.position.x
-        #     person.velocity.y = transformed_velocity.point.y - person.position.y
-        #     person.velocity.z = transformed_velocity.point.z - person.position.z
-
-        #     # Print transformed velocity
-        #     print("transformed vel: ", [person.velocity.x, person.velocity.y, person.velocity.z])
-
-        # except tf2_ros.LookupException as e:
-        #     rospy.logwarn(f"Transform lookup failed: {e}")
-        #     continue
-        # except tf2_ros.ExtrapolationException as e:
-        #     rospy.logwarn(f"Transform extrapolation failed: {e}")
-        #     continue
-
         person.position.x = obj_msg.position[0]
         person.position.y = obj_msg.position[1]
         person.position.z = obj_msg.position[2]
-
         person.velocity.x = obj_msg.velocity[0]
         person.velocity.y = obj_msg.velocity[1]
         person.velocity.z = obj_msg.velocity[2]
@@ -433,7 +416,7 @@ def update_pos_vel(pos_history, vel_history, obj_msg, pos_index, vel_index, id):
 # TODO:
 # - fix frame issue
 def point_cloud_wrapper(ros_msg):
-    global kp_conf_thresh
+    global kp_conf_thresh, zed_location
 
     # Create a header
     header = std_msgs.msg.Header()
@@ -473,8 +456,9 @@ def point_cloud_wrapper(ros_msg):
             # - the keypoint is finite (not inf, -inf, nor NaN)
             # - the keypoint is not at the origin (sign of an error)
             if confidence > kp_conf_thresh and math.isfinite(keypoint.kp[0]) and keypoint.kp[0] != 0:
-                # Convert point coordinates from millimeters to meters
-                point = [keypoint.kp[0], keypoint.kp[1], keypoint.kp[2], blue]
+                # Transform the keypoint into the map frame
+                point = [keypoint.kp[0], keypoint.kp[1], keypoint.kp[2]]
+                point.append(blue)
                 points.append(point)
 
         # Display the position of the skeleton
@@ -487,7 +471,6 @@ def point_cloud_wrapper(ros_msg):
     return point_cloud_msg
 
 # Populate a ROS MarkerArray message for each person's velocity using velocity_wrapper()
-# TODO: if distance between any two connected keypoints is too large (> 1 m), FLAG THESE POINTS AS outliers somehow
 def bone_array_wrapper(ros_msg, removed_ids):
     global kp_conf_thresh
     frame = ros_msg.header.frame_id
@@ -514,7 +497,7 @@ def bone_array_wrapper(ros_msg, removed_ids):
                 end = skeleton.keypoints[end_idx].kp
                 if start[3] > kp_conf_thresh and end[3] > kp_conf_thresh and start[0] != 0 and end[0] != 0 and math.isfinite(start[0]) and math.isfinite(end[0]):
                     start_point = start
-                    end_point = end
+                    end_point = end 
                     bone = bone_wrapper(person_id, connection_idx, start_point, end_point, [0,0,1,1], frame, Marker.ADD)
                     bone_array.markers.append(bone)
                 else:
@@ -609,11 +592,8 @@ def velocity_wrapper(person_id, person_vel, person_pos, color, frame, action):
     velocity.color.a = color[3]
 
     # Set the start and end points of the arrow
-    
-    # Get velocity and pose of object
     vel = person_vel
     pos = person_pos
-        
     end = [pos[0] + vel[0], pos[1] + vel[1], pos[2] + vel[2]]
     
     start_point = Point()
@@ -638,80 +618,6 @@ def velocity_wrapper(person_id, person_vel, person_pos, color, frame, action):
 
     return velocity
     
-def transform_point(point, original_frame, target_frame, tf_buffer):
-    # Create a PointStamped for the position
-    point_stamped = tf2_geometry_msgs.PointStamped()
-    point_stamped.header.stamp = rospy.Time.now()
-    point_stamped.header.frame_id = original_frame
-    point_stamped.point.x = point[0]
-    point_stamped.point.y = point[1]
-    point_stamped.point.z = point[2]
-
-    try:
-        # Retrieve the transform 
-        transform = tf_buffer.lookup_transform(target_frame, original_frame, point_stamped.header.stamp, rospy.Duration(1.0))
-
-        # Apply the transform to the point
-        transformed_point = tf2_geometry_msgs.do_transform_point(point_stamped, transform)
-
-        return [transformed_point.point.x, transformed_point.point.y, transformed_point.point.z]
-
-    except tf2_ros.LookupException as e:
-        rospy.logwarn(f"Transform lookup failed: {e}")
-        
-    except tf2_ros.ExtrapolationException as e:
-        rospy.logwarn(f"Transform extrapolation failed: {e}")
-
-# Transform skeleton data from local to map frame
-# def local_to_map_transform(ros_msg):
-#     try:
-#         # Create a transform from chairry_base_link to zed2i_left_camera_frame
-#         # Hard-coded because tfBuffer wasn't working
-#         transform = TransformStamped()
-#         transform.header.stamp = rospy.Time.now()
-#         transform.header.frame_id = "chairry_base_link"
-#         transform.child_frame_id = CAMERA_NAME + "_left_camera_frame"
-#         transform.transform.translation.x = -0.25
-#         transform.transform.translation.y = 0
-#         transform.transform.translation.z = 1.53
-#         quat = tf.transformations.quaternion_from_euler(0, 0.05, 0)
-#         transform.transform.rotation.x = quat[0]
-#         transform.transform.rotation.y = quat[1]
-#         transform.transform.rotation.z = quat[2]
-#         transform.transform.rotation.w = quat[3]
-
-#         for obj_msg in ros_msg.objects:
-#             # Transform position
-#             orig_pose = PointStamped()
-#             orig_pose.point.x = obj_msg.position[0]
-#             orig_pose.point.y = obj_msg.position[1]
-#             orig_pose.point.z = obj_msg.position[2]
-
-#             new_pos = tf2_geometry_msgs.do_transform_point(orig_pose, transform)
-#             obj_msg.position = [new_pos.point.x, new_pos.point.y, new_pos.point.z]
-
-#             # Velocity is relative to the position, so no need to transform it
-            
-#             # Transform keypoints
-#             skeleton = obj_msg.skeleton_3d
-#             for keypoint in skeleton.keypoints:
-#                 orig_kp = PointStamped()
-#                 orig_kp.point.x = keypoint.kp[0]
-#                 orig_kp.point.y = keypoint.kp[1]
-#                 orig_kp.point.z = keypoint.kp[2]
-#                 conf = keypoint.kp[3]
-
-#                 new_point = tf2_geometry_msgs.do_transform_point(orig_kp, transform)
-#                 keypoint.kp = [new_point.point.x, new_point.point.y, new_point.point.z, conf]
-
-#         # Update the frame_id
-#         ros_msg.header.frame_id = "chairry_base_link"  
-
-#     # Handle errors
-#     except tf2_ros.LookupException or tf2_ros.ConnectivityException or tf2_ros.ExtrapolationException as e:
-#         print("Failed to transform object to chairry_base_link frame due to Exception: ", e)
-
-#     return ros_msg
 
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
 def main():
@@ -732,7 +638,7 @@ def main():
     # Publish the point clouds of keypoints
     pub_pc = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud', PointCloud2, queue_size=10)
     # Publish the velocity markers
-    pub_vels = rospy.Publisher(CAMERA_NAME+'/skeletons/velocity_markers/z', MarkerArray, queue_size=10)
+    pub_vels = rospy.Publisher(CAMERA_NAME+'/skeletons/velocity_markers', MarkerArray, queue_size=10)
 
     ###################
     ##### Threads #####
@@ -807,6 +713,23 @@ def main():
             while run_signal:
                 sleep(0.001)
 
+            #########################
+            ##### Get Transform #####
+            #########################
+            if zed_location == 'chairry':
+                # Get the latest common time
+                common_time = tf_buffer.get_latest_common_time("chairry_base_link", CAMERA_NAME + "_left_camera_frame")
+
+                # Get the transform using the common time
+                transform = tf_buffer.lookup_transform(
+                    "odom", 
+                    CAMERA_NAME + "_left_camera_frame", 
+                    common_time,  # Use the latest common time
+                    rospy.Duration(1.0)  # Timeout duration
+                )
+            else:
+                transform = None
+
 
             #######################
             ##### Ingest Data #####
@@ -815,7 +738,7 @@ def main():
             lock.acquire()
             
             # Ingest the skeletons and their IDs
-            objects, labels = ingest_skeletons(skeletons, ids, point_cloud)
+            objects, labels, frame = ingest_skeletons(skeletons, ids, point_cloud, transform)
         
             # Release the lock for the next iteration
             lock.release()
@@ -827,48 +750,26 @@ def main():
 
             ###### USEFUL DATA ######
             # Publish skeletons in ROS as a custom ObjectsStamped message for social_navigator
-            ros_msg, pos_history, vel_history, removed_ids = objects_wrapper(objects, labels, pos_history, vel_history)
+            ros_msg, pos_history, vel_history, removed_ids = objects_wrapper(objects, labels, pos_history, vel_history, frame)
             pub_objects.publish(ros_msg)
             
             # Publish the people for move_base
-            people_msg = people_wrapper(ros_msg, tf_buffer)
+            people_msg = people_wrapper(ros_msg)
             pub_people.publish(people_msg)
 
             ###### VISUALISAITON ######
             # Publish a 3-D point cloud with all valid keypoints
-            pc_msg = point_cloud_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame")
+            pc_msg = point_cloud_wrapper(ros_msg)
             pub_pc.publish(pc_msg)
 
             # Publish the bones
-            bone_msg = bone_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
+            bone_msg = bone_array_wrapper(ros_msg, removed_ids)
             pub_bones.publish(bone_msg)  
                       
             # Publish velocity markers
-            markers_msg = velocity_array_wrapper(ros_msg, CAMERA_NAME + "_left_camera_frame", removed_ids)
+            markers_msg = velocity_array_wrapper(ros_msg, removed_ids)
             pub_vels.publish(markers_msg)
-            
-            
-
-            # # Transform the skeletons to the chairry_base_link frame
-            # if zed_location == 'chairry':
-            #     # Publish skeletons in ROS as a custom ObjectsStamped message
-            #     transform_msg = local_to_map_transform(ros_msg)
-            #     pub_c.publish(transform_msg)
-                
-            #     # Publish the bones
-            #     bone_msg = bone_array_wrapper(transform_msg, "chairry_base_link", removed_ids)
-            #     pub_bones_c.publish(bone_msg)  
-
-            #     # Publish a point cloud with all keypoints for visualisation
-            #     pc_msg = point_cloud_wrapper(transform_msg, "chairry_base_link")
-            #     pub_pc_c.publish(pc_msg)
-                
-            #     # Publish a marker for the velocity of the skeletons
-            #     markers_msg = velocity_array_wrapper(transform_msg, "chairry_base_link", removed_ids)
-            #     pub_marker_c.publish(markers_msg)
-                
-            
-    
+          
     # Close the camera when the node is shutdown
     zed.close()
 
