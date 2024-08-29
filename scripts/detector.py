@@ -28,8 +28,10 @@ from sensor_msgs.msg import PointCloud2, PointField
 import sensor_msgs.point_cloud2 as pc2
 import std_msgs.msg
 from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Point, Quaternion
+from geometry_msgs.msg import Point, Quaternion, PoseStamped
 from people_msgs.msg import People, Person
+from nav_msgs.msg import Path
+import datetime
 
 
 lock = Lock()
@@ -623,7 +625,86 @@ def velocity_wrapper(person_id, person_vel, person_pos, color, frame, action):
     velocity.pose.orientation.w = 1.0
 
     return velocity
+
+ # populate a ROS MarkerArray message for each person's velocity using velocity_wrapper()
+def path_array_wrapper(ros_msg, unique_id):
+    frame = ros_msg.header.frame_id
+    path_array = MarkerArray()
+    path_array.markers = []
+    for obj_msg in ros_msg.objects:
+        person_id = obj_msg.label_id
+        person_vel = obj_msg.velocity
+        tol = 0.05
+        vel_mag = np.linalg.norm(person_vel)
+        person_pos = obj_msg.position
+        if vel_mag <= tol or not math.isfinite(person_vel[0]) or not math.isfinite(person_pos[0]):
+            continue
+        rainbow_colors = [
+            (255, 0, 0),    # Red
+            (255, 127, 0),  # Orange
+            (255, 255, 0),  # Yellow
+            (0, 255, 0),    # Green
+            (0, 0, 255),    # Blue
+            (75, 0, 130),   # Indigo
+            (148, 0, 211)   # Violet
+        ]
+        color = rainbow_colors[(person_id - 1) % len(rainbow_colors)]
+        person_color = [color[0]/255, color[1]/255, color[2]/255, 1]
+        vel = path_wrapper(person_id, unique_id, person_vel, person_pos, person_color, frame, Marker.ADD) 
+        path_array.markers.append(vel)
+    return path_array
     
+# Wrap velocity data for each person into a ROS Marker message
+def path_wrapper(person_id, unique_id, person_vel, person_pos, color, frame, action):
+    path = Marker()
+    path.header.frame_id = frame
+    path.header.stamp = rospy.Time.now()
+    path.ns = "path_" + str(person_id)
+    path.id = unique_id
+    path.type = Marker.ARROW
+    path.action = action
+
+    # Set the scale of the arrow
+    path.scale.x = 0.1  # shaft diameter
+    path.scale.y = 0.1  # head diameter
+    path.scale.z = 0.1  # head length
+
+    # Set the color (red, green, blue, alpha)
+    path.color.r = color[0]
+    path.color.g = color[1]
+    path.color.b = color[2]
+    path.color.a = color[3]
+
+    # Set the start and end points of the arrow
+    vel = person_vel
+    # scale vel to be 0.1 meters long
+    length = np.linalg.norm(vel)/0.1
+    vel = [vel[0]/length, vel[1]/length, vel[2]/length]
+
+    pos = person_pos
+    end = [pos[0] + vel[0], pos[1] + vel[1], pos[2] + vel[2]]
+    
+    start_point = Point()
+    start_point.x = pos[0]
+    start_point.y = pos[1]
+    start_point.z = 0.0 
+
+    end_point = Point()
+    end_point.x = end[0]
+    end_point.y = end[1]
+    end_point.z = 0.0 
+
+    path.points.append(start_point)
+    path.points.append(end_point)
+    
+    # Set the orientation of the arrow
+    path.pose.orientation = Quaternion()
+    path.pose.orientation.x = 0.0
+    path.pose.orientation.y = 0.0
+    path.pose.orientation.z = 0.0
+    path.pose.orientation.w = 1.0
+
+    return path
 
 # Receive data from zed camera, ingest YOLO pose detections, and publish the results
 def main():
@@ -636,15 +717,17 @@ def main():
     # Publish the people
     pub_people = rospy.Publisher('/people', People, queue_size=50)
     # Publish the objects
-    pub_objects = rospy.Publisher(CAMERA_NAME+'/skeletons/objects', zed_msgs.ObjectsStamped, queue_size=50)
+    pub_objects = rospy.Publisher(CAMERA_NAME+'/objects', zed_msgs.ObjectsStamped, queue_size=50)
 
     ###### VISUALISATION ######
     # Publish the bones
-    pub_bones = rospy.Publisher(CAMERA_NAME+'/skeletons/bones', MarkerArray, queue_size=10)
+    pub_bones = rospy.Publisher(CAMERA_NAME+'/viz/bones', MarkerArray, queue_size=10)
     # Publish the point clouds of keypoints
-    pub_pc = rospy.Publisher(CAMERA_NAME+'/skeletons/point_cloud', PointCloud2, queue_size=10)
+    pub_pc = rospy.Publisher(CAMERA_NAME+'/viz/point_cloud', PointCloud2, queue_size=10)
     # Publish the velocity markers
-    pub_vels = rospy.Publisher(CAMERA_NAME+'/skeletons/velocity_markers', MarkerArray, queue_size=10)
+    pub_vels = rospy.Publisher(CAMERA_NAME+'/viz/velocity_markers', MarkerArray, queue_size=10)
+    # Publish the path of the person
+    pub_path = rospy.Publisher(CAMERA_NAME+'/viz/path', MarkerArray, queue_size=10)
 
     ###################
     ##### Threads #####
@@ -690,6 +773,7 @@ def main():
     point_cloud = sl.Mat()
     pos_history = []
     vel_history = []
+    unique_id = 0
 
     # Initialize the tf_buffer and TransformListener
     tf_buffer = tf2_ros.Buffer()
@@ -775,6 +859,12 @@ def main():
             # Publish velocity markers
             markers_msg = velocity_array_wrapper(ros_msg, removed_ids)
             pub_vels.publish(markers_msg)
+
+            # Publish the path of the person
+            path_msg = path_array_wrapper(ros_msg, unique_id)
+            pub_path.publish(path_msg)
+            unique_id += 1
+
           
     # Close the camera when the node is shutdown
     zed.close()
