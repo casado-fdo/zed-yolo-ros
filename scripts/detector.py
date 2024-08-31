@@ -103,7 +103,7 @@ def ingest_skeletons(skeletons, labels, point_cloud, transform):
 
             # If the zed is on chairry, transform the 3D point into the odom frame
             if zed_location == 'chairry':
-                point_3d = transform_point(point_3d, CAMERA_NAME + "_left_camera_frame", "odom", transform)
+                point_3d = transform_point(point_3d, CAMERA_NAME + "_left_camera_frame", transform)
 
             point_3d.append(conf)
             people[i][j] = point_3d
@@ -121,7 +121,7 @@ def ingest_skeletons(skeletons, labels, point_cloud, transform):
     # Return the people and their IDs/labels, as well as the frame
     return people, labels, frame
 
-def transform_point(point, original_frame, target_frame, transform):
+def transform_point(point, original_frame, transform):
     # Create a PointStamped for the position
     point_stamped = tf2_geometry_msgs.PointStamped()
     point_stamped.header.stamp = rospy.Time.now()
