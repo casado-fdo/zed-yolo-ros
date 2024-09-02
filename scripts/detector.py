@@ -252,6 +252,7 @@ def objects_wrapper(objects, labels, pos_history, vel_history, frame):
             if num_kps > 0:
                 position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
                 obj_msg.position = position
+                print("object position: ", position)
             else:
                 # No valid keypoints: skip this person
                 continue  
@@ -316,6 +317,7 @@ def people_wrapper(ros_msg):
         person.velocity.x = obj_msg.velocity[0]
         person.velocity.y = obj_msg.velocity[1]
         person.velocity.z = obj_msg.velocity[2]
+        print("person position: ", person.position)
 
         people_msg.people.append(person)
 
