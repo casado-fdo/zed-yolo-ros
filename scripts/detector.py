@@ -252,24 +252,15 @@ def objects_wrapper(objects, labels, pos_history, vel_history, frame):
             if num_kps > 0:
                 position = [position[0]/num_kps, position[1]/num_kps, position[2]/num_kps]
                 obj_msg.position = position
-                print("object position: ", position)
             else:
                 # No valid keypoints: skip this person
                 continue  
-
-            # Transform position into odom frame if we're on chairry (currently in zed2i frame)
-            # if zed_location == 'chairry':
-            #     position = transform_point(position, CAMERA_NAME + "_left_camera_frame", "odom", tf_buffer)
-            #     obj_msg.position = position
-            # else:
-            #     obj_msg.position = position
 
 
             # Get indices of the person in the position and velocity histories
             id = labels[i]
             pos_index, vel_index = get_indices(id, pos_history, vel_history)
             
-            # print("id: ", id, "pos_index: ", pos_index, "vel_index: ", vel_index)
             # If the person has a valid current position & has been detected before
             # Then update the position and velocity histories accordingly
             if num_kps > 0 and pos_index != -1 and vel_index != -1:
@@ -317,7 +308,6 @@ def people_wrapper(ros_msg):
         person.velocity.x = obj_msg.velocity[0]
         person.velocity.y = obj_msg.velocity[1]
         person.velocity.z = obj_msg.velocity[2]
-        print("person position: ", person.position)
 
         people_msg.people.append(person)
 
