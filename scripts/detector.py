@@ -235,7 +235,7 @@ def main():
     
     
     input_type = sl.InputType()
-    if opt[1] is not None:
+    if opt[1] is not None:  
         input_type.set_from_svo_file(opt[1])
         
     # Create a InitParameters object and set configuration parameters
@@ -253,8 +253,8 @@ def main():
     runtime_params = sl.RuntimeParameters()
     
     if len(cameras) > 1:
-        print(f"MULTIPLE CAMERAS FOUND... -> choosing: {cameras[1].serial_number} ")
-        init_params.set_from_serial_number(cameras[1].serial_number)
+        print(f"MULTIPLE CAMERAS FOUND... -> choosing: {cameras[0].serial_number} ")
+        init_params.set_from_serial_number(cameras[0].serial_number)
     
     zed = sl.Camera()        
     status = zed.open(init_params)
