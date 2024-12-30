@@ -376,7 +376,8 @@ if __name__ == '__main__':
     display = True
     train = False
     # opt = ["yolov8x-oiv7",None, 416, 0.4]    
-    opt = ["yolov8x",None, 416, 0.55]     
+    # opt = ["yolov8x",None, 416, 0.55]     
+    opt = ["yolo11x",None, 416, 0.55]     
     # opt = ["yolov8x",None, 416, 0.45]    
     script_path = os.path.dirname(os.path.realpath(__file__))
     models_path = script_path+'/../data/'
