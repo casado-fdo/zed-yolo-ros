@@ -328,17 +328,17 @@ def main():
             # Wait for detections
             lock.acquire()
             # -- Ingest detections
-            print_detections(detections)
+            # print_detections(detections)
             zed.ingest_custom_box_objects(detections)
             lock.release()
-            print("Ingested")
+            # print("Ingested")
             # -- Retrieve objects
-            print_objects_list(objects)
+            # print_objects_list(objects)
             zed.retrieve_objects(objects, obj_runtime_param)
             
             # Publish in ROS as an ObjectStamped message
             ros_msg = ros_wrapper(objects)
-            print(ros_msg)
+            # print(ros_msg)
             pub_l.publish(ros_msg)
             # pub_g.publish(local_to_map_transform(ros_msg, tfBuffer))
             
