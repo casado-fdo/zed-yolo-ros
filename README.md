@@ -68,6 +68,8 @@ You can also provide your **own trained YOLO weights** by placing them under the
 
 Messages follow the [`zed_interfaces/ObjectsStamped`](https://github.com/stereolabs/zed-ros-interfaces/blob/master/msg/ObjectsStamped.msg) definition.
 
+![Demo in Rviz](assets/demo_rviz.gif)
+
 ---
 
 ## License
